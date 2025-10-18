@@ -14,3 +14,4 @@ torch
 gunicorn==21.2.0
 huggingface_hub
 google-generativeai
+werkzeug>=2.2.0

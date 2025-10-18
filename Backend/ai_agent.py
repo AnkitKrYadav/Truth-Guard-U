@@ -11,8 +11,9 @@ Agents supported:
 import os
 import json
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import requests
+import time
 
 # Optional imports
 try:
@@ -46,7 +47,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 HF_API_KEY = os.getenv("HF_API_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash-latest")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
 if openai and OPENAI_API_KEY:
     openai.api_key = OPENAI_API_KEY
@@ -97,11 +98,20 @@ def fetch_news_sources(claim: str, limit: int = 3) -> List[str]:
         return []
     try:
         url = "https://newsapi.org/v2/everything"
-        params = {"q": claim, "apiKey": NEWS_API_KEY, "pageSize": limit}
+        params = {"q": claim, "apiKey": NEWS_API_KEY, "pageSize": max(1, min(limit, 3))}
         resp = requests.get(url, params=params, timeout=8)
         resp.raise_for_status()
         articles = resp.json().get("articles", [])
         return [a.get("source", {}).get("name") for a in articles if a.get("source")][:limit]
+    except requests.exceptions.HTTPError as he:
+        status = getattr(he.response, "status_code", None)
+        if status == 429:
+            _logger.info("fetch_news_sources rate-limited (429). Skipping enrichment.")
+        elif status and 400 <= status < 500:
+            _logger.info("fetch_news_sources client error %s. Skipping enrichment.", status)
+        else:
+            _logger.warning("fetch_news_sources error: %s", he)
+        return []
     except Exception as e:
         _logger.warning("fetch_news_sources error: %s", e)
         return []
@@ -112,11 +122,20 @@ def fetch_factcheck_claims(claim: str, limit: int = 3) -> List[str]:
         return []
     try:
         url = "https://factchecktools.googleapis.com/v1alpha1/claims:search"
-        params = {"query": claim, "key": FACTCHECK_API_KEY, "pageSize": limit}
+        params = {"query": claim, "key": FACTCHECK_API_KEY, "pageSize": max(1, min(limit, 3))}
         resp = requests.get(url, params=params, timeout=8)
         resp.raise_for_status()
         items = resp.json().get("claims", [])
         return [item.get("text", "") for item in items[:limit]]
+    except requests.exceptions.HTTPError as he:
+        status = getattr(he.response, "status_code", None)
+        if status == 429:
+            _logger.info("fetch_factcheck_claims rate-limited (429). Skipping enrichment.")
+        elif status and 400 <= status < 500:
+            _logger.info("fetch_factcheck_claims client error %s. Skipping enrichment.", status)
+        else:
+            _logger.warning("fetch_factcheck_claims error: %s", he)
+        return []
     except Exception as e:
         _logger.warning("fetch_factcheck_claims error: %s", e)
         return []
@@ -132,7 +151,10 @@ def openai_agent(claim: str) -> Dict[str, Any]:
         return {"status": "Needs Verification", "summary": "OpenAI key missing.", "sources": [], "confidence": 50}
     try:
         from langchain_openai import ChatOpenAI
-        from langchain.schema import HumanMessage
+        try:
+            from langchain.schema import HumanMessage  # older versions
+        except Exception:
+            from langchain_core.messages import HumanMessage  # newer versions
 
         llm = ChatOpenAI(api_key=OPENAI_API_KEY, model_name=OPENAI_MODEL, temperature=0.2)
         prompt = f"""
@@ -144,8 +166,10 @@ def openai_agent(claim: str) -> Dict[str, Any]:
         }}
         Claim: {claim}
         """
-        resp = llm([HumanMessage(content=prompt)])
-        data = _safe_json_parse(resp.content)
+
+        # Use invoke() per LangChain deprecation notice
+        resp = llm.invoke([HumanMessage(content=prompt)])
+        data = _safe_json_parse(resp.content if hasattr(resp, "content") else str(resp))
         if not data:
             data = {"status": "Needs Verification", "summary": "AI could not parse.", "sources": []}
         return data
@@ -295,28 +319,31 @@ def gemini_agent(claim: str) -> Dict[str, Any]:
         }
     
     try:
-        # Use the official SDK
-        model = genai.GenerativeModel('gemini-pro')
-        
-        prompt = f"""You are a fact-checking assistant. Analyze the following claim and determine if it is True, False, or Needs Verification.
-Give a short summary and 1-3 credible sources (if available). Respond ONLY in JSON format:
+        # Use the official SDK and default model from env
+        model = genai.GenerativeModel(GEMINI_MODEL)
 
-{{
-    "status": "True / False / Needs Verification",
-    "summary": "brief explanation",
-    "sources": ["source1", "source2"]
-}}
+        json_skeleton = (
+            '{\n'
+            '    "status": "True / False / Needs Verification",\n'
+            '    "summary": "brief explanation",\n'
+            '    "sources": ["source1", "source2"]\n'
+            '}\n'
+        )
+        prompt = (
+            "You are a fact-checking assistant. Analyze the following claim and determine if it is True, False, or Needs Verification.\n"
+            "Give a short summary and 1-3 credible sources (if available). Respond ONLY in JSON format:\n\n"
+            f"{json_skeleton}\n"
+            f"Claim: {claim}"
+        )
 
-Claim: {claim}"""
-        
         response = model.generate_content(prompt)
-        
+
         _logger.info(f"Gemini API call successful")
-        
+
         # Parse response
-        if response and response.text:
+        if response and getattr(response, "text", None):
             ai_result = _safe_json_parse(response.text)
-            
+
             if ai_result:
                 return ai_result
             else:
@@ -327,14 +354,14 @@ Claim: {claim}"""
                     "sources": ["Google Gemini AI"],
                     "confidence": 50
                 }
-        
+
         return {
             "status": "Needs Verification",
             "summary": "No response from Gemini API.",
             "sources": [],
             "confidence": 50
         }
-        
+
     except Exception as e:
         error_msg = str(e)
         _logger.warning(f"Gemini agent failed: {error_msg}")
@@ -345,48 +372,103 @@ Claim: {claim}"""
                 "status": "Needs Verification",
                 "summary": "Google Gemini API key is invalid. Get a new key at https://aistudio.google.com/app/apikey",
                 "sources": [],
-                "confidence": 50
+                "confidence": 50,
+                "error_code": 401
             }
         elif "404" in error_msg or "not found" in error_msg.lower():
             return {
                 "status": "Needs Verification",
                 "summary": "Gemini API access issue. Make sure Gemini API is enabled in your Google Cloud project.",
                 "sources": [],
-                "confidence": 50
+                "confidence": 50,
+                "error_code": 404
+            }
+        elif "429" in error_msg or "quota" in error_msg.lower():
+            # Try to extract retry seconds if present
+            retry_after: Optional[int] = None
+            try:
+                # Look for 'retry_delay {\n  seconds: N' pattern
+                marker = "retry_delay {"
+                if marker in error_msg:
+                    seg = error_msg.split(marker, 1)[1]
+                    # find 'seconds:' after marker
+                    parts = seg.split("seconds:", 1)
+                    if len(parts) > 1:
+                        num = parts[1].split("\n", 1)[0].strip()
+                        retry_after = int(float(num))
+            except Exception:
+                retry_after = None
+            return {
+                "status": "Needs Verification",
+                "summary": f"Gemini rate limited. Please retry later.",
+                "sources": [],
+                "confidence": 50,
+                "error_code": 429,
+                "retry_after": retry_after
             }
         else:
             return {
                 "status": "Needs Verification",
                 "summary": f"Gemini error: {error_msg[:100]}. Try OpenAI or HuggingFace instead.",
                 "sources": [],
-                "confidence": 50
+                "confidence": 50,
+                "error_code": 500
             }
 
 
 # ---------------------------------------------------------------------
 # Main Verify Function
 # ---------------------------------------------------------------------
-def verify_claim_with_ai(claim: str, agent: str = "openai") -> Dict[str, Any]:
+def verify_claim_with_ai(claim: str, agent: str = "gemini") -> Dict[str, Any]:
     """Dispatch to selected agent."""
     _logger.info(f"🔍 Verifying claim with agent ({agent}): {claim}")
 
-    if agent == "openai":
-        ai_result = openai_agent(claim)
-    elif agent == "hf":
-        ai_result = huggingface_agent(claim)
-    elif agent == "gemini":
-        ai_result = gemini_agent(claim)
-    elif agent == "llama":
-        ai_result = llama_agent(claim)
+    chosen = agent
+    ai_result: Dict[str, Any]
+
+    if agent == "auto":
+        # Try Gemini -> OpenAI -> HF
+        for candidate in ["gemini", "openai", "hf"]:
+            _logger.info("Trying agent: %s", candidate)
+            if candidate == "gemini":
+                ai_result = gemini_agent(claim)
+            elif candidate == "openai":
+                ai_result = openai_agent(claim)
+            else:
+                ai_result = huggingface_agent(claim)
+
+            error_code = ai_result.get("error_code") if isinstance(ai_result, dict) else None
+            if error_code == 429:
+                # Immediate fallback without sleeping to keep API responsive
+                _logger.info("Agent %s rate-limited. Falling back.", candidate)
+                chosen = candidate  # keep track for logging even if falling back
+                continue
+            # Accept first non-rate-limited response
+            chosen = candidate
+            break
+        else:
+            # All failed in rate-limit manner
+            ai_result = {"status": "Needs Verification", "summary": "All AI providers rate-limited. Please retry.", "sources": [], "confidence": 50}
     else:
-        ai_result = {"status": "Needs Verification", "summary": "Unknown agent.", "sources": [], "confidence": 50}
+        if agent == "openai":
+            ai_result = openai_agent(claim)
+        elif agent == "hf":
+            ai_result = huggingface_agent(claim)
+        elif agent == "gemini":
+            ai_result = gemini_agent(claim)
+        elif agent == "llama":
+            ai_result = llama_agent(claim)
+        else:
+            ai_result = {"status": "Needs Verification", "summary": "Unknown agent.", "sources": [], "confidence": 50}
 
     # Combine with external sources
     news_sources = fetch_news_sources(claim)
     fact_checks = fetch_factcheck_claims(claim)
     ai_result["sources"] = list(set(ai_result.get("sources", []) + news_sources + fact_checks))
     ai_result["confidence"] = _compute_confidence(ai_result.get("status", ""), news_sources, fact_checks)
-    ai_result["agent"] = agent
+    # Report actual used agent
+    ai_result["agent"] = chosen
+    ai_result["agent_used"] = chosen
     return ai_result
 
 
