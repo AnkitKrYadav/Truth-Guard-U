@@ -6,7 +6,8 @@ import sqlite3
 import os
 from dotenv import load_dotenv
 import os
-print("OPENAI KEY (Render):", os.getenv("OPENAI_API_KEY")[:15])
+# Avoid printing secrets to logs
+# print("OPENAI KEY (Render):", os.getenv("OPENAI_API_KEY")[:15])
 
 # Load environment variables
 load_dotenv()
@@ -37,8 +38,15 @@ def _compute_confidence(status: str, news_sources: list, fact_checks: list) -> i
     return max(0, min(100, score))
 
 
-app = Flask(__name__)
-CORS(app)  # Allow frontend to call API
+static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Frontend", "react-app", "build")
+app = Flask(__name__, static_folder=os.path.abspath(static_dir))
+
+# Restrictive CORS in production, permissive in local dev
+allowed_origin = os.getenv("ALLOWED_ORIGIN")
+if allowed_origin:
+    CORS(app, resources={r"/api/*": {"origins": allowed_origin}})
+else:
+    CORS(app)  # fallback for local/dev
 
 # Database path
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -111,17 +119,19 @@ def categories():
 def verify_claim_route():
     data = request.json or {}
     claim = data.get("claim")
+    agent = data.get("agent", "openai")  # ← get selected agent
     if not claim:
         return jsonify({"error": "No claim provided"}), 400
 
-    print("Verifying claim with AI:", claim)
+    print(f"Verifying claim with AI ({agent}):", claim)
     
-    if verify_claim_with_ai and os.getenv("OPENAI_API_KEY"):
+    if verify_claim_with_ai:
         try:
-            ai_result = verify_claim_with_ai(claim)
+            ai_result = verify_claim_with_ai(claim, agent=agent)  # ← pass agent
             return jsonify(ai_result)
         except Exception as e:
             print("AI agent error:", e)
+
 
     # Fallback logic
     status = "Needs Verification"
@@ -148,13 +158,23 @@ def verify_claim_route():
 
 
 # --------- Serve React Frontend ---------
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok"})
+
 @app.route("/", defaults={"path": ""})
 @app.route("/<path:path>")
 def serve(path):
-    if path != "" and os.path.exists(os.path.join(app.static_folder, path)):
+    index_path = os.path.join(app.static_folder or "", "index.html")
+    file_path = os.path.join(app.static_folder or "", path)
+    if path and app.static_folder and os.path.exists(file_path):
         return send_from_directory(app.static_folder, path)
-    return send_from_directory(app.static_folder, "index.html")
+    if app.static_folder and os.path.exists(index_path):
+        return send_from_directory(app.static_folder, "index.html")
+    # If frontend build not present, show simple message
+    return jsonify({"message": "Backend running. Frontend build not found."})
 
 # --------- Run Server ---------
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    debug = os.getenv("FLASK_DEBUG", "1") == "1"
+    app.run(debug=debug, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))

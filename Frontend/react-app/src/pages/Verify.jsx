@@ -1,8 +1,10 @@
 import React, { useState } from "react";
 import axios from "axios";
+import { API_BASE_URL } from "../utils/api";
 
 function Verify() {
   const [claim, setClaim] = useState("");
+  const [selectedAgent, setSelectedAgent] = useState("openai");
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
 
@@ -13,14 +15,15 @@ function Verify() {
     setLoading(true);
     setResult(null);
     try {
-      const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || "http://localhost:5000";
-      console.log("Using API base:", API_BASE_URL);
+      const base = API_BASE_URL || "";
+      console.log("Using API base:", base);
+
       const res = await axios.post(
-        `${API_BASE_URL}/api/verify`,
-        { claim },
-        { headers: { "Content-Type": "application/json" }  // explicitly set JSON header
-      });
-      // const res = await axios.post("https://truth-guard-89p9.onrender.com/api/verify", { claim });
+        `${base}/api/verify`,
+        { claim, agent: selectedAgent },
+        { headers: { "Content-Type": "application/json" } }
+      );
+
       setResult(res.data);
     } catch (err) {
       console.error(err);
@@ -36,11 +39,18 @@ function Verify() {
     return "bg-yellow-200 text-yellow-800";
   };
 
-  // 🔥 NEW: Get color for confidence bar
   const getConfidenceColor = (confidence) => {
     if (confidence >= 70) return "bg-green-500";
     if (confidence >= 40) return "bg-yellow-500";
     return "bg-red-500";
+  };
+
+  const getAgentColor = (agent) => {
+    if (agent === "openai") return "bg-blue-100 text-blue-800";
+    if (agent === "hf") return "bg-purple-100 text-purple-800";
+    if (agent === "gemini") return "bg-green-100 text-green-800";
+    if (agent === "llama") return "bg-orange-100 text-orange-800";
+    return "bg-gray-100 text-gray-800";
   };
 
   return (
@@ -52,7 +62,7 @@ function Verify() {
       {/* Input Section */}
       <form
         onSubmit={handleSubmit}
-        className="flex flex-col sm:flex-row gap-3 mb-6"
+        className="flex flex-col sm:flex-row gap-3 mb-6 items-center"
       >
         <input
           type="text"
@@ -61,6 +71,17 @@ function Verify() {
           placeholder="Enter news or claim to verify..."
           className="flex-grow p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
+
+        <select
+          value={selectedAgent}
+          onChange={(e) => setSelectedAgent(e.target.value)}
+          className="p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+          <option value="openai">TruthGPT (OpenAI)</option>
+          <option value="hf">DeepFact (HuggingFace)</option>
+          <option value="gemini">GeminiGuard (Google)</option>
+        </select>
+
         <button
           type="submit"
           disabled={loading}
@@ -77,9 +98,20 @@ function Verify() {
             <p className="text-red-500">{result.error}</p>
           ) : (
             <>
-              <p className="mb-2 font-medium text-lg">
-                Claim: <span className="font-semibold">{result.claim}</span>
-              </p>
+              <div className="flex items-center gap-3 mb-2">
+                <p className="font-medium text-lg">
+                  Claim: <span className="font-semibold">{claim}</span>
+                </p>
+                {result.agent && (
+                  <span
+                    className={`px-2 py-1 text-xs font-semibold rounded-full ${getAgentColor(
+                      result.agent
+                    )}`}
+                  >
+                    Verified by {result.agent}
+                  </span>
+                )}
+              </div>
 
               <span
                 className={`inline-block px-3 py-1 text-sm font-semibold rounded-full ${getBadgeColor(
@@ -93,7 +125,7 @@ function Verify() {
                 {result.summary}
               </p>
 
-              {/* 🔥 NEW: Confidence Score Section */}
+              {/* Confidence Score */}
               {result.confidence !== undefined && (
                 <div className="mt-4">
                   <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">
@@ -116,6 +148,13 @@ function Verify() {
                 <p className="mt-4 text-sm text-gray-600 dark:text-gray-300">
                   <span className="font-medium">Sources:</span>{" "}
                   {result.sources.join(", ")}
+                </p>
+              )}
+
+              {/* Fallback Indicator */}
+              {result.agent && result.agent !== selectedAgent && (
+                <p className="mt-2 text-xs text-yellow-600 dark:text-yellow-400 font-semibold">
+                  Fallback agent was used instead of your selection.
                 </p>
               )}
             </>

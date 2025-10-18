@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import StatsWidget from "../components/StatsWidget";
 import NewsCard from "../components/NewsCard";
 import axios from "axios";
+import { API_BASE_URL } from "../utils/api";
 
 const Trending = () => {
   const [trendingNews, setTrendingNews] = useState([]);
@@ -12,10 +13,10 @@ const Trending = () => {
   useEffect(() => {
     async function fetchData() {
       try {
-        const newsRes = await axios.get("https://truth-guard-89p9.onrender.com/api/trending");
+  const newsRes = await axios.get(`${API_BASE_URL}/api/trending`);
         setTrendingNews(newsRes.data);
 
-        const catRes = await axios.get("https://truth-guard-89p9.onrender.com/api/categories");
+  const catRes = await axios.get(`${API_BASE_URL}/api/categories`);
         setCategories(catRes.data);
       } catch (err) {
         console.error("Error fetching data:", err);

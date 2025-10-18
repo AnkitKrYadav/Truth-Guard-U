@@ -1,12 +1,11 @@
 """
 ai_agent.py
+Enhanced AI agent handlers for Truth-Guard.
 
-Clean AI agent helpers for Truth-Guard.
-
-Functions:
-- fetch_news_sources(claim, limit=3): returns list of news source names (uses NewsAPI)
-- fetch_factcheck_claims(claim, limit=3): returns short fact-check texts (uses FactCheck Tools API)
-- verify_claim_with_ai(claim): calls OpenAI to produce a JSON result: {status, summary, sources, confidence}
+Agents supported:
+- OpenAI (gpt)
+- HuggingFace (inference API)
+- Google Gemini (via API)
 """
 
 import os
@@ -15,12 +14,28 @@ import logging
 from typing import List, Dict, Any
 import requests
 
+# Optional imports
 try:
     import openai
 except ImportError:
     openai = None
 
-# Setup logging
+try:
+    from transformers import pipeline
+except ImportError:
+    pipeline = None
+
+try:
+    from huggingface_hub import login as hf_login
+except ImportError:
+    hf_login = None
+
+try:
+    import google.generativeai as genai
+except ImportError:
+    genai = None
+
+# Logging setup
 logging.basicConfig(level=logging.INFO)
 _logger = logging.getLogger(__name__)
 
@@ -28,18 +43,58 @@ _logger = logging.getLogger(__name__)
 NEWS_API_KEY = os.getenv("NEWS_API_KEY")
 FACTCHECK_API_KEY = os.getenv("FACTCHECK_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+HF_API_KEY = os.getenv("HF_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash-latest")
 
 if openai and OPENAI_API_KEY:
     openai.api_key = OPENAI_API_KEY
 
+if genai and GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+
+
+# ---------------------------------------------------------------------
+# Utility helpers
+# ---------------------------------------------------------------------
+def _safe_json_parse(text: str) -> Any:
+    """Try to safely parse a JSON object from text."""
+    text = text.strip()
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1:
+        try:
+            return json.loads(text[start:end + 1])
+        except Exception:
+            pass
+    return None
+
+
+def _compute_confidence(ai_status: str, news_sources: list, fact_checks: list) -> int:
+    """Compute confidence score 0–100."""
+    score = 50
+    if ai_status == "True":
+        score += 30
+    elif ai_status == "False":
+        score -= 30
+    score += min(len(news_sources), 3) * 5
+    for fc in fact_checks:
+        fc_l = fc.lower()
+        if "true" in fc_l or "verified" in fc_l:
+            score += 10
+        elif "false" in fc_l or "fake" in fc_l:
+            score -= 10
+    return max(0, min(100, score))
+
 
 def fetch_news_sources(claim: str, limit: int = 3) -> List[str]:
-    """Fetch top news source names related to the claim using NewsAPI."""
     if not NEWS_API_KEY:
-        _logger.debug("No NEWS_API_KEY configured; skipping news fetch")
         return []
-
     try:
         url = "https://newsapi.org/v2/everything"
         params = {"q": claim, "apiKey": NEWS_API_KEY, "pageSize": limit}
@@ -53,11 +108,8 @@ def fetch_news_sources(claim: str, limit: int = 3) -> List[str]:
 
 
 def fetch_factcheck_claims(claim: str, limit: int = 3) -> List[str]:
-    """Fetch short fact-check claim texts using Google Fact Check Tools API."""
     if not FACTCHECK_API_KEY:
-        _logger.debug("No FACTCHECK_API_KEY configured; skipping factcheck fetch")
         return []
-
     try:
         url = "https://factchecktools.googleapis.com/v1alpha1/claims:search"
         params = {"query": claim, "key": FACTCHECK_API_KEY, "pageSize": limit}
@@ -70,111 +122,276 @@ def fetch_factcheck_claims(claim: str, limit: int = 3) -> List[str]:
         return []
 
 
-def _safe_json_parse(text: str) -> Any:
-    """Attempt to parse JSON from text, even if embedded in extra text."""
-    text = text.strip()
-    try:
-        return json.loads(text)
-    except Exception:
-        pass
-    start = text.find("{")
-    end = text.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        snippet = text[start:end + 1]
-        try:
-            return json.loads(snippet)
-        except Exception:
-            pass
-    return None
+# ---------------------------------------------------------------------
+# AI Agents
+# ---------------------------------------------------------------------
 
-
-def _compute_confidence(ai_status: str, news_sources: list, fact_checks: list) -> int:
-    """Compute confidence score from 0 to 100."""
-    score = 50  # default neutral
-
-    # AI signal
-    if ai_status == "True":
-        score += 30
-    elif ai_status == "False":
-        score -= 30
-
-    # News sources signal
-    score += min(len(news_sources), 3) * 5  # up to +15
-
-    # Fact-check signal
-    for fc in fact_checks:
-        fc_lower = fc.lower()
-        if "true" in fc_lower or "verified" in fc_lower:
-            score += 10
-        elif "false" in fc_lower or "misleading" in fc_lower:
-            score -= 10
-
-    return max(0, min(100, score))
-
-
-def verify_claim_with_ai(claim: str) -> Dict[str, Any]:
-    """
-    Call OpenAI to analyze a claim and return JSON with:
-    {
-        "status": "True" | "False" | "Needs Verification",
-        "summary": "...",
-        "sources": ["source1", ...],
-        "confidence": 0-100
-    }
-    """
+def openai_agent(claim: str) -> Dict[str, Any]:
+    """Use OpenAI GPT model."""
     if not OPENAI_API_KEY:
-        return {
-            "status": "Needs Verification",
-            "summary": "No OpenAI API key configured.",
-            "sources": [],
-            "confidence": 50
-        }
-
-    prompt = f"""
-    You are a fact-checking assistant. Analyze the following claim and determine if it is True, False, or Needs Verification.
-    Give a short summary and 1-3 credible sources (if available). Respond only in JSON format:
-
-    {{
-        "status": "True / False / Needs Verification",
-        "summary": "...",
-        "sources": ["source1", "source2"]
-    }}
-
-    Claim: {claim}
-    """
-
+        return {"status": "Needs Verification", "summary": "OpenAI key missing.", "sources": [], "confidence": 50}
     try:
         from langchain_openai import ChatOpenAI
         from langchain.schema import HumanMessage
 
-        print("trying langchain")
-
         llm = ChatOpenAI(api_key=OPENAI_API_KEY, model_name=OPENAI_MODEL, temperature=0.2)
-        response = llm([HumanMessage(content=prompt)])
-        ai_result = _safe_json_parse(response.content)
+        prompt = f"""
+        You are a fact-checking assistant. Analyze this claim and respond in JSON format:
+        {{
+            "status": "True / False / Needs Verification",
+            "summary": "...",
+            "sources": ["..."]
+        }}
+        Claim: {claim}
+        """
+        resp = llm([HumanMessage(content=prompt)])
+        data = _safe_json_parse(resp.content)
+        if not data:
+            data = {"status": "Needs Verification", "summary": "AI could not parse.", "sources": []}
+        return data
     except Exception as e:
-        _logger.warning("AI verification failed: %s", e)
-        ai_result = None
+        _logger.warning("OpenAI agent failed: %s", e)
+        return {"status": "Needs Verification", "summary": str(e), "sources": [], "confidence": 50}
 
-    if not ai_result:
-        ai_result = {
-            "status": "Needs Verification",
-            "summary": "AI could not parse the response.",
-            "sources": []
+
+def huggingface_agent(claim: str) -> Dict[str, Any]:
+    """Call HuggingFace Inference API for fact-checking."""
+    
+    # Check if API key is valid
+    if not HF_API_KEY:
+        return {
+            "status": "Needs Verification", 
+            "summary": "HuggingFace requires an API key. Get a free key at https://huggingface.co/settings/tokens (Create a 'Read' token)", 
+            "sources": [], 
+            "confidence": 50
         }
+    
+    # Try multiple available models
+    models_to_try = [
+        "distilbert/distilbert-base-uncased-finetuned-sst-2-english",  # Correct namespace
+        "cardiffnlp/twitter-roberta-base-sentiment-latest",
+        "facebook/bart-large-mnli"
+    ]
+    
+    for model_name in models_to_try:
+        url = f"https://api-inference.huggingface.co/models/{model_name}"
+        headers = {"Authorization": f"Bearer {HF_API_KEY}"}
+        payload = {"inputs": claim}
+        
+        try:
+            resp = requests.post(url, headers=headers, json=payload, timeout=15)
+            
+            _logger.info(f"HF API Response Status for {model_name}: {resp.status_code}")
+            
+            if resp.status_code == 404:
+                _logger.warning(f"Model {model_name} not found, trying next...")
+                continue
+            
+            if resp.status_code == 403:
+                return {
+                    "status": "Needs Verification",
+                    "summary": "Your HuggingFace API key is invalid or has been revoked. Please create a new 'Read' token at https://huggingface.co/settings/tokens and update your .env file.",
+                    "sources": [],
+                    "confidence": 50
+                }
+            
+            if resp.status_code == 401:
+                return {
+                    "status": "Needs Verification",
+                    "summary": "Authentication failed. Please verify your HuggingFace API key in the .env file.",
+                    "sources": [],
+                    "confidence": 50
+                }
+            
+            resp.raise_for_status()
+            result = resp.json()
+            
+            # Check for model loading error
+            if isinstance(result, dict) and "error" in result:
+                error_msg = result.get("error", "")
+                if "loading" in error_msg.lower():
+                    return {"status": "Needs Verification", "summary": "Model is loading, please try again in a moment.", "sources": [], "confidence": 50}
+                _logger.warning(f"Model error: {error_msg}, trying next model...")
+                continue
+            
+            # Parse response (works for both sentiment and NLI models)
+            if isinstance(result, list) and result:
+                # Handle nested list structure
+                top_results = result[0] if isinstance(result[0], list) else result
+                
+                if isinstance(top_results, list) and top_results:
+                    top_result = top_results[0]
+                else:
+                    top_result = top_results
+                
+                if isinstance(top_result, dict):
+                    label = top_result.get("label", "").upper()
+                    score = top_result.get("score", 0)
+                    
+                    # Map result to fact-check status
+                    status = "Needs Verification"
+                    if "POSITIVE" in label or "ENTAILMENT" in label:
+                        summary = f"HuggingFace AI analysis suggests this might be plausible. ({label}, confidence: {score:.1%}). Independent verification recommended."
+                    elif "NEGATIVE" in label or "CONTRADICTION" in label:
+                        summary = f"HuggingFace AI analysis suggests skepticism. ({label}, confidence: {score:.1%}). Independent verification recommended."
+                    else:
+                        summary = f"HuggingFace AI analysis: {label} (confidence: {score:.1%}). Manual fact-checking recommended."
+                    
+                    confidence = int(score * 100)
+                    
+                    return {
+                        "status": status, 
+                        "summary": summary, 
+                        "sources": [f"HuggingFace AI ({model_name.split('/')[-1]})"], 
+                        "confidence": confidence
+                    }
+            
+            # If we got here, response format was unexpected, try next model
+            _logger.warning(f"Unexpected response format from {model_name}, trying next...")
+            continue
+            
+        except Exception as e:
+            _logger.warning(f"HuggingFace model {model_name} failed: %s", e)
+            continue
+    
+    # All models failed
+    return {
+        "status": "Needs Verification", 
+        "summary": "HuggingFace AI service temporarily unavailable. Please try OpenAI or check back later.", 
+        "sources": [], 
+        "confidence": 50
+    }
 
-    # Combine with external sources for confidence
+
+def llama_agent(claim: str) -> Dict[str, Any]:
+    """Use local Ollama (LLaMA) model."""
+    try:
+        from ollama import chat
+        res = chat(model="llama3", messages=[{"role": "user", "content": claim}])
+        content = res.get("message", {}).get("content", "")
+        parsed = _safe_json_parse(content) or {"status": "Needs Verification", "summary": content, "sources": []}
+        return parsed
+    except Exception as e:
+        _logger.warning("LLaMA agent failed: %s", e)
+        return {"status": "Needs Verification", "summary": str(e), "sources": [], "confidence": 50}
+
+
+def gemini_agent(claim: str) -> Dict[str, Any]:
+    """Use Google Gemini API for fact-checking."""
+    if not GEMINI_API_KEY:
+        return {
+            "status": "Needs Verification",
+            "summary": "Google Gemini API key missing. Get a free key at https://aistudio.google.com/app/apikey",
+            "sources": [],
+            "confidence": 50
+        }
+    
+    if not genai:
+        return {
+            "status": "Needs Verification",
+            "summary": "Google Generative AI package not installed. Run: pip install google-generativeai",
+            "sources": [],
+            "confidence": 50
+        }
+    
+    try:
+        # Use the official SDK
+        model = genai.GenerativeModel('gemini-pro')
+        
+        prompt = f"""You are a fact-checking assistant. Analyze the following claim and determine if it is True, False, or Needs Verification.
+Give a short summary and 1-3 credible sources (if available). Respond ONLY in JSON format:
+
+{{
+    "status": "True / False / Needs Verification",
+    "summary": "brief explanation",
+    "sources": ["source1", "source2"]
+}}
+
+Claim: {claim}"""
+        
+        response = model.generate_content(prompt)
+        
+        _logger.info(f"Gemini API call successful")
+        
+        # Parse response
+        if response and response.text:
+            ai_result = _safe_json_parse(response.text)
+            
+            if ai_result:
+                return ai_result
+            else:
+                # Fallback if JSON parsing fails
+                return {
+                    "status": "Needs Verification",
+                    "summary": response.text[:200] + "..." if len(response.text) > 200 else response.text,
+                    "sources": ["Google Gemini AI"],
+                    "confidence": 50
+                }
+        
+        return {
+            "status": "Needs Verification",
+            "summary": "No response from Gemini API.",
+            "sources": [],
+            "confidence": 50
+        }
+        
+    except Exception as e:
+        error_msg = str(e)
+        _logger.warning(f"Gemini agent failed: {error_msg}")
+        
+        # Provide helpful error messages
+        if "API_KEY_INVALID" in error_msg or "invalid" in error_msg.lower():
+            return {
+                "status": "Needs Verification",
+                "summary": "Google Gemini API key is invalid. Get a new key at https://aistudio.google.com/app/apikey",
+                "sources": [],
+                "confidence": 50
+            }
+        elif "404" in error_msg or "not found" in error_msg.lower():
+            return {
+                "status": "Needs Verification",
+                "summary": "Gemini API access issue. Make sure Gemini API is enabled in your Google Cloud project.",
+                "sources": [],
+                "confidence": 50
+            }
+        else:
+            return {
+                "status": "Needs Verification",
+                "summary": f"Gemini error: {error_msg[:100]}. Try OpenAI or HuggingFace instead.",
+                "sources": [],
+                "confidence": 50
+            }
+
+
+# ---------------------------------------------------------------------
+# Main Verify Function
+# ---------------------------------------------------------------------
+def verify_claim_with_ai(claim: str, agent: str = "openai") -> Dict[str, Any]:
+    """Dispatch to selected agent."""
+    _logger.info(f"🔍 Verifying claim with agent ({agent}): {claim}")
+
+    if agent == "openai":
+        ai_result = openai_agent(claim)
+    elif agent == "hf":
+        ai_result = huggingface_agent(claim)
+    elif agent == "gemini":
+        ai_result = gemini_agent(claim)
+    elif agent == "llama":
+        ai_result = llama_agent(claim)
+    else:
+        ai_result = {"status": "Needs Verification", "summary": "Unknown agent.", "sources": [], "confidence": 50}
+
+    # Combine with external sources
     news_sources = fetch_news_sources(claim)
     fact_checks = fetch_factcheck_claims(claim)
-    confidence = _compute_confidence(ai_result.get("status", "Needs Verification"), news_sources, fact_checks)
-
     ai_result["sources"] = list(set(ai_result.get("sources", []) + news_sources + fact_checks))
-    ai_result["confidence"] = confidence
+    ai_result["confidence"] = _compute_confidence(ai_result.get("status", ""), news_sources, fact_checks)
+    ai_result["agent"] = agent
     return ai_result
 
 
 if __name__ == "__main__":
-    # Quick local test
-    test_claim = "ChatGPT can pass advanced exams"
-    result = verify_claim_with_ai(test_claim)
-    print(json.dumps(result, indent=2))
+    test_claim = "Elon Musk is the CEO of Tesla."
+    for a in ["openai", "hf", "llama"]:
+        print(f"\n=== {a.upper()} ===")
+        print(json.dumps(verify_claim_with_ai(test_claim, a), indent=2))
