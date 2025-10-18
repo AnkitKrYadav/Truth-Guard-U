@@ -115,8 +115,7 @@ def verify_claim_route():
         return jsonify({"error": "No claim provided"}), 400
 
     print("Verifying claim with AI:", claim)
-    print(os.getenv("OPENAI_API_KEY"))
-
+    
     if verify_claim_with_ai and os.getenv("OPENAI_API_KEY"):
         try:
             ai_result = verify_claim_with_ai(claim)
