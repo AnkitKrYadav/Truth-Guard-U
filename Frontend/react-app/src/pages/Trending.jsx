@@ -7,11 +7,12 @@ import { API_BASE_URL, postExpertVerification } from "../utils/api";
 const Trending = () => {
   const [trendingNews, setTrendingNews] = useState([]);
   const [categories, setCategories] = useState(["All"]);
+  const [regions, setRegions] = useState(["in"]);
   const [filter, setFilter] = useState("All");
   const [loading, setLoading] = useState(true);
-  const [agent, setAgent] = useState("openai");
+  const [agent, setAgent] = useState("auto");
   const [region, setRegion] = useState("in");
-  const [submitting, setSubmitting] = useState(null); // key of item being submitted
+  const [submitting, setSubmitting] = useState(null);
 
   const fetchTrending = async () => {
     setLoading(true);
@@ -21,7 +22,7 @@ const Trending = () => {
       try {
         newsRes = await axios.get(`${API_BASE_URL}/api/trending/live?agent=${agent}&limit=12&region=${region}`);
       } catch (err) {
-        // If OpenAI is rate-limited, fallback to HuggingFace
+        // If selected agent is rate-limited and it's OpenAI, fallback to HuggingFace
         if (agent === "openai" && err.response && err.response.status === 429) {
           usedAgent = "hf";
           newsRes = await axios.get(`${API_BASE_URL}/api/trending/live?agent=hf&limit=12&region=${region}`);
@@ -40,7 +41,12 @@ const Trending = () => {
         actions: n.actions || { like: 0, dislike: 0, bookmark: 0 },
       }));
       setTrendingNews(items);
-      const derivedCats = ["All", ...Array.from(new Set(items.map(i => i.category).filter(Boolean)))];
+      // Only show categories that have news
+      const categoryCounts = items.reduce((acc, item) => {
+        acc[item.category] = (acc[item.category] || 0) + 1;
+        return acc;
+      }, {});
+      const derivedCats = ["All", ...Object.keys(categoryCounts)];
       setCategories(derivedCats);
       if (agent === "openai" && usedAgent === "hf") {
         window.alert("OpenAI rate limit reached. Showing HuggingFace results instead.");
@@ -52,29 +58,102 @@ const Trending = () => {
     }
   };
 
+  // Debounce data fetching on agent/region changes
   useEffect(() => {
-    fetchTrending();
+    const t = setTimeout(() => {
+      fetchTrending();
+    }, 400);
+    return () => clearTimeout(t);
     // eslint-disable-next-line
   }, [agent, region]);
+
+  useEffect(() => {
+    // Fetch categories and regions from backend
+    async function fetchFilters() {
+      try {
+        const catsRes = await axios.get(`${API_BASE_URL}/api/admin/categories`);
+        setCategories(["All", ...catsRes.data]);
+        const regionsRes = await axios.get(`${API_BASE_URL}/api/admin/regions`);
+        const raw = regionsRes?.data;
+        let list = [];
+        if (Array.isArray(raw)) {
+          list = raw;
+        } else if (raw && Array.isArray(raw?.regions)) {
+          list = raw.regions;
+        } else if (raw && typeof raw === "object") {
+          // Try to pull values from an object shape
+          const vals = Object.values(raw).flat();
+          list = vals.filter(Boolean);
+        }
+        // Ensure we always have a sane default set
+        if (!list || list.length === 0) {
+          list = ["all", "in", "us", "gb", "au", "ca", "de", "fr", "jp", "ru", "cn"];
+        }
+        // Dedupe and normalize with 'all' first
+        const normalized = Array.from(new Set(["all", ...list.map(String)])).filter(Boolean);
+        setRegions(normalized);
+        // Ensure currently selected region is valid
+        if (!normalized.includes(region)) {
+          setRegion(normalized[0] || "all");
+        }
+      } catch (err) {
+        // fallback to defaults
+        setCategories(["All", "Politics", "Tech", "Health", "Entertainment", "Science", "Sports", "Business", "World", "Local", "Crime", "Environment", "Education", "Lifestyle", "Travel", "Food", "Opinion", "General"]);
+        setRegions(["in", "us", "gb", "au", "ca", "de", "fr", "jp", "ru", "cn"]);
+      }
+    }
+    fetchFilters();
+  }, []);
 
   const filteredNews = trendingNews.filter(
     (item) => filter === "All" || item.category === filter
   );
 
-  // Stats based on categories
-const statsData = [
-  { title: "Total Trending News", value: trendingNews.length, icon: "📊", bgColor: "bg-blue-100" },
-  { title: "Politics", value: trendingNews.filter(n => n.category === "Politics").length, icon: "🗳️", bgColor: "bg-red-100" },
-  { title: "Health", value: trendingNews.filter(n => n.category === "Health").length, icon: "❤️", bgColor: "bg-green-100" },
-  { title: "Tech", value: trendingNews.filter(n => n.category === "Tech").length, icon: "💻", bgColor: "bg-yellow-100" },
-  { title: "Entertainment", value: trendingNews.filter(n => n.category === "Entertainment").length, icon: "🎬", bgColor: "bg-purple-100" },
-];
+  // Stats: Always show main categories
+  // Only show stats for categories with news (plus Total Trending News)
+  const totalIcon = (
+    <svg className="w-7 h-7" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M3 20h18v1H3z"/>
+      <rect x="6" y="9" width="3" height="9" rx="1"></rect>
+      <rect x="11" y="5" width="3" height="13" rx="1"></rect>
+      <rect x="16" y="11" width="3" height="7" rx="1"></rect>
+    </svg>
+  );
+  const allStats = [
+    { title: "Politics", icon: "🗳️", bgColor: "bg-red-100", darkBg: "dark:bg-red-900/40" },
+    { title: "Tech", icon: "💻", bgColor: "bg-yellow-100", darkBg: "dark:bg-yellow-900/30" },
+    { title: "Health", icon: "❤️", bgColor: "bg-green-100", darkBg: "dark:bg-green-900/30" },
+    { title: "Entertainment", icon: "🎬", bgColor: "bg-purple-100", darkBg: "dark:bg-purple-900/30" },
+    { title: "Science", icon: "🔬", bgColor: "bg-indigo-100", darkBg: "dark:bg-indigo-900/30" },
+    { title: "Sports", icon: "🏅", bgColor: "bg-orange-100", darkBg: "dark:bg-orange-900/30" },
+    { title: "Business", icon: "💼", bgColor: "bg-teal-100", darkBg: "dark:bg-teal-900/30" },
+    { title: "World", icon: "🌎", bgColor: "bg-cyan-100", darkBg: "dark:bg-cyan-900/30" },
+    { title: "Local", icon: "🏠", bgColor: "bg-gray-200", darkBg: "dark:bg-gray-800/40" },
+    { title: "Crime", icon: "🚔", bgColor: "bg-pink-100", darkBg: "dark:bg-pink-900/30" },
+    { title: "Environment", icon: "🌱", bgColor: "bg-green-200", darkBg: "dark:bg-green-900/30" },
+    { title: "Education", icon: "🎓", bgColor: "bg-blue-200", darkBg: "dark:bg-blue-900/30" },
+    { title: "Lifestyle", icon: "💃", bgColor: "bg-pink-200", darkBg: "dark:bg-pink-900/30" },
+    { title: "Travel", icon: "✈️", bgColor: "bg-yellow-200", darkBg: "dark:bg-yellow-900/30" },
+    { title: "Food", icon: "🍔", bgColor: "bg-orange-200", darkBg: "dark:bg-orange-900/30" },
+    { title: "Opinion", icon: "💬", bgColor: "bg-gray-300", darkBg: "dark:bg-gray-800/40" },
+    { title: "General", icon: "📰", bgColor: "bg-gray-100", darkBg: "dark:bg-gray-800/40" },
+  ];
+  const catsWithNews = Array.from(new Set(trendingNews.map(n => n.category).filter(Boolean)));
+  const statsData = [
+    { title: "Total Trending News", value: trendingNews.length, icon: totalIcon, bgColor: "bg-blue-100", darkBg: "dark:bg-blue-900/30" },
+    ...allStats
+      .filter(stat => catsWithNews.includes(stat.title))
+      .map(stat => ({
+        ...stat,
+        value: trendingNews.filter(n => n.category === stat.title).length
+      }))
+  ];
 
 
   return (
     <div className="p-6 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 min-h-screen space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-gray-900">Trending Topics</h1>
+  <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Trending Topics</h1>
         <button
           onClick={fetchTrending}
           className="ml-4 px-4 py-2 rounded bg-blue-600 text-white font-semibold hover:bg-blue-700 transition"
@@ -94,19 +173,24 @@ const statsData = [
       {/* Controls */}
       <div className="flex flex-col sm:flex-row sm:items-center gap-4 overflow-x-auto py-4">
         {/* Category Filters */}
-        {categories.map((cat) => (
-          <button
-            key={cat}
-            onClick={() => setFilter(cat)}
-            className={`px-4 py-2 rounded-full font-medium transition ${
-              filter === cat
-                ? "bg-blue-600 text-white"
-                : "bg-gray-200 text-gray-700 hover:bg-blue-500 hover:text-white"
-            }`}
-          >
-            {cat}
-          </button>
-        ))}
+        {/* Only show categories with news (plus All) */}
+        {(() => {
+          const catsWithNews = Array.from(new Set(trendingNews.map(n => n.category).filter(Boolean)));
+          const catsToShow = ["All", ...catsWithNews];
+          return catsToShow.map((cat) => (
+            <button
+              key={cat}
+              onClick={() => setFilter(cat)}
+              className={`px-4 py-2 rounded-full font-medium transition ${
+                filter === cat
+                  ? "bg-blue-600 text-white"
+                  : "bg-gray-200 text-gray-700 hover:bg-blue-500 hover:text-white"
+              }`}
+            >
+              {cat}
+            </button>
+          ));
+        })()}
 
         {/* Region Toggle */}
         <div className="flex items-center gap-2 ml-2">
@@ -116,22 +200,27 @@ const statsData = [
             onChange={e => setRegion(e.target.value)}
             className="px-2 py-1 rounded border border-gray-300 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
           >
-            <option value="in">India</option>
-            <option value="us">USA</option>
-            <option value="gb">UK</option>
-            <option value="au">Australia</option>
-            <option value="ca">Canada</option>
-            <option value="de">Germany</option>
-            <option value="fr">France</option>
-            <option value="jp">Japan</option>
-            <option value="ru">Russia</option>
-            <option value="cn">China</option>
+            {(Array.isArray(regions) ? regions : []).map(r => (
+              <option key={r} value={r}>{r === "all" ? "All Regions" : r.toUpperCase()}</option>
+            ))}
           </select>
         </div>
 
         {/* Agent Toggle */}
         <div className="ml-auto flex items-center gap-2">
           <span className="text-sm text-gray-600 dark:text-gray-300">Model:</span>
+          <button
+            onClick={() => setAgent("auto")}
+            className={`px-3 py-1 rounded ${agent === "auto" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}`}
+          >
+            Auto
+          </button>
+          <button
+            onClick={() => setAgent("gemini")}
+            className={`px-3 py-1 rounded ${agent === "gemini" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}`}
+          >
+            Gemini
+          </button>
           <button
             onClick={() => setAgent("openai")}
             className={`px-3 py-1 rounded ${agent === "openai" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}`}
@@ -157,6 +246,8 @@ const statsData = [
             const status = v.status;
             const conf = v.confidence;
             const expert = v.expert;
+            const providerRaw = (v.agent_used || v.agent || "");
+            const provider = providerRaw === "hf" ? "HuggingFace" : providerRaw === "llama" ? "LLaMA" : providerRaw === "openai" ? "OpenAI" : providerRaw === "gemini" ? "Gemini" : providerRaw;
             const key = news.url || news.title;
             const actions = news.actions || { like: 0, dislike: 0, bookmark: 0 };
             
@@ -191,13 +282,29 @@ const statsData = [
             };
 
             return (
-              <div key={news.id} className="relative">
+              <div
+                key={news.id}
+                className="flex flex-col gap-2 border border-gray-200 dark:border-gray-700 rounded-xl p-4 bg-white dark:bg-gray-900 shadow-sm"
+              >
                 {status && (
-                  <span className={`absolute top-2 right-2 text-xs font-semibold px-2 py-1 rounded-full z-10 ${
-                    (expert?.status || status) === 'True' ? 'bg-green-200 text-green-800' : (expert?.status || status) === 'False' ? 'bg-red-200 text-red-800' : 'bg-yellow-200 text-yellow-800'
-                  }`}>
-                    {(expert?.status || status)}{conf !== undefined ? ` • ${conf}%` : ''}{expert ? ' • Expert' : ''}{v.cached ? ' • Cached' : ''}
-                  </span>
+                  <div className={`flex flex-wrap items-center gap-2 mb-2`}>
+                    <span
+                      className={`text-xs font-semibold px-2 py-1 rounded-full ${
+                        (expert?.status || status) === 'True'
+                          ? 'bg-green-200 text-green-800'
+                          : (expert?.status || status) === 'False'
+                          ? 'bg-red-200 text-red-800'
+                          : 'bg-yellow-200 text-yellow-800'
+                      }`}
+                      title={provider ? `Verified via ${provider}` : undefined}
+                    >
+                      {(expert?.status || status)}
+                      {conf !== undefined ? ` • ${conf}%` : ''}
+                      {expert ? ' • Expert' : ''}
+                      {v.cached ? ' • Cached' : ''}
+                      {provider ? ` • via ${provider}` : ''}
+                    </span>
+                  </div>
                 )}
                 <NewsCard
                   title={news.title}
@@ -205,10 +312,12 @@ const statsData = [
                   summary={news.summary}
                   category={news.category}
                   url={news.url}
+                  expert={expert}
+                  frameless
                 />
                 
                 {/* Professional Action Buttons */}
-                <div className="mt-3 flex items-center justify-between gap-2 flex-wrap">
+                <div className="mt-3 pt-2 flex items-center justify-between gap-2 flex-wrap border-t border-gray-200 dark:border-gray-700">
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => handleAction("like")}

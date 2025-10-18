@@ -7,18 +7,36 @@ def _categorize(title: str) -> str:
     t = (title or "").lower()
     if any(k in t for k in ["election", "government", "president", "minister", "parliament", "bjp", "congress", "policy", "vote", "politic"]):
         return "Politics"
-    if any(k in t for k in ["ai", "tech", "software", "microsoft", "google", "apple", "openai", "startup", "chip", "semiconductor"]):
+    if any(k in t for k in ["ai", "tech", "software", "microsoft", "google", "apple", "openai", "startup", "chip", "semiconductor", "robotics", "machine learning", "data", "cybersecurity"]):
         return "Tech"
-    if any(k in t for k in ["covid", "health", "vaccine", "doctor", "hospital", "disease"]):
+    if any(k in t for k in ["covid", "health", "vaccine", "doctor", "hospital", "disease", "mental health", "medicine", "wellness", "fitness"]):
         return "Health"
-    if any(k in t for k in ["movie", "film", "bollywood", "hollywood", "music", "celebrity", "show"]):
+    if any(k in t for k in ["movie", "film", "bollywood", "hollywood", "music", "celebrity", "show", "tv", "series", "actor", "actress", "award"]):
         return "Entertainment"
-    if any(k in t for k in ["space", "nasa", "spacex", "science", "research"]):
+    if any(k in t for k in ["space", "nasa", "spacex", "science", "research", "astronomy", "physics", "biology", "chemistry"]):
         return "Science"
-    if any(k in t for k in ["football", "cricket", "soccer", "tennis", "olympic", "nba"]):
+    if any(k in t for k in ["football", "cricket", "soccer", "tennis", "olympic", "nba", "sports", "athlete", "match", "tournament"]):
         return "Sports"
-    if any(k in t for k in ["market", "stock", "economy", "business", "startup", "funding"]):
+    if any(k in t for k in ["market", "stock", "economy", "business", "startup", "funding", "finance", "trade", "investment", "bank", "cryptocurrency"]):
         return "Business"
+    if any(k in t for k in ["world", "global", "international", "foreign", "diplomacy", "united nations"]):
+        return "World"
+    if any(k in t for k in ["local", "city", "town", "district", "municipal", "community"]):
+        return "Local"
+    if any(k in t for k in ["crime", "police", "court", "law", "justice", "arrest", "investigation"]):
+        return "Crime"
+    if any(k in t for k in ["environment", "climate", "pollution", "wildlife", "nature", "sustainability", "green"]):
+        return "Environment"
+    if any(k in t for k in ["education", "school", "college", "university", "student", "teacher", "exam", "learning"]):
+        return "Education"
+    if any(k in t for k in ["lifestyle", "fashion", "beauty", "culture", "trend", "relationship", "parenting"]):
+        return "Lifestyle"
+    if any(k in t for k in ["travel", "tourism", "destination", "flight", "hotel", "trip"]):
+        return "Travel"
+    if any(k in t for k in ["food", "recipe", "restaurant", "cuisine", "cooking", "diet"]):
+        return "Food"
+    if any(k in t for k in ["opinion", "editorial", "column", "analysis", "review"]):
+        return "Opinion"
     return "General"
 
 
@@ -118,9 +136,10 @@ def fetch_trending_mix(limit_per_source: int = 10, region: str = "in") -> List[D
     items = []
     items += fetch_newsapi_top_headlines(country=region, page_size=limit_per_source)
     items += fetch_reddit_trending(limit=limit_per_source)
-    items += fetch_twitter_trending(region=region, limit=limit_per_source)
-    items += fetch_facebook_trending(region=region, limit=limit_per_source)
-    items += fetch_instagram_trending(region=region, limit=limit_per_source)
+    # items += fetch_facebook_trending(region=region, limit=limit_per_source)  # removed mock Facebook
+    # items += fetch_instagram_trending(region=region, limit=limit_per_source)  # removed mock Instagram
+    # Explicitly drop any Twitter/Facebook/Instagram-sourced mock entries
+    items = [it for it in items if (it.get("source") or "").lower() not in ("twitter", "facebook", "instagram")]
     # de-duplicate by title
     seen = set()
     unique = []

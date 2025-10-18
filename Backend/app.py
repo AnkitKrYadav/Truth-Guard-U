@@ -7,6 +7,7 @@ import os
 from dotenv import load_dotenv, find_dotenv
 from datetime import datetime
 import os
+import time
 # Avoid printing secrets to logs
 # print("OPENAI KEY (Render):", os.getenv("OPENAI_API_KEY")[:15])
 
@@ -57,6 +58,17 @@ else:
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "database", "news.db")
 
+# --------- Simple In-Memory TTL Cache (dev optimization) ---------
+# Caches select API responses briefly to collapse duplicate requests (e.g., React StrictMode)
+_response_cache = {
+    "trending_top": {"data": None, "ts": 0.0},
+    "stats": {"data": None, "ts": 0.0},
+}
+
+# TTLs can be tuned via env vars
+TRENDING_TOP_TTL = int(os.getenv("TRENDING_TOP_TTL", "30"))  # seconds
+STATS_TTL = int(os.getenv("STATS_TTL", "15"))  # seconds
+
 # --------- Database Helper ---------
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
@@ -75,7 +87,8 @@ def init_db():
             title TEXT NOT NULL,
             category TEXT NOT NULL,
             source TEXT,
-            summary TEXT
+            summary TEXT,
+            region TEXT DEFAULT 'all'
         )
         """
     )
@@ -153,6 +166,49 @@ def init_db():
             confidence INTEGER,
             like_count INTEGER DEFAULT 0,
             updated_at TEXT NOT NULL
+        )
+        """
+    )
+    
+    # Users table
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            is_active INTEGER DEFAULT 1,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+
+    # Badges table
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS badges (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            color TEXT NOT NULL,
+            description TEXT
+        )
+        """
+    )
+
+    # Experts table
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS experts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            full_name TEXT NOT NULL,
+            organization TEXT,
+            badge_id INTEGER,
+            is_verified INTEGER DEFAULT 0,
+            verified_at TEXT,
+            FOREIGN KEY(user_id) REFERENCES users(id),
+            FOREIGN KEY(badge_id) REFERENCES badges(id)
         )
         """
     )
@@ -345,8 +401,12 @@ except Exception:
 # --------- API Routes ---------
 @app.route("/api/trending")
 def trending():
+    region = request.args.get("region", "all")
     conn = get_db_connection()
-    news = conn.execute("SELECT * FROM news").fetchall()
+    if region == "all":
+        news = conn.execute("SELECT * FROM news").fetchall()
+    else:
+        news = conn.execute("SELECT * FROM news WHERE region=?", (region,)).fetchall()
     conn.close()
     return jsonify([dict(n) for n in news])
 
@@ -363,30 +423,42 @@ def categories():
 def trending_live():
     """Fetch live trending items from mixed sources and verify them with AI.
     Query params:
-      - agent: openai | hf (default openai)
-      - limit: int (default 10)
-      - region: country code (default 'in')
+    - agent: auto | gemini | openai | hf (default auto)
+    - limit: int (default 10)
+    - region: country code (default 'in')
     """
-    agent = request.args.get("agent", "openai")
+    agent = request.args.get("agent", "auto")
     try:
         limit = int(request.args.get("limit", 10))
     except Exception:
         limit = 10
-    region = request.args.get("region", "in")
+    region = request.args.get("region", "all")
 
     if not fetch_trending_mix:
         return jsonify({"error": "Trending fetcher not available"}), 500
 
     raw_items = fetch_trending_mix(limit_per_source=max(1, limit // 2), region=region)
-    raw_items = raw_items[:limit]
+    # De-duplicate by URL/title key and cap to limit
+    def _make_key(it: dict) -> str:
+        return (it.get("url") or it.get("title") or "").strip()
+    seen = set()
+    deduped = []
+    for it in raw_items:
+        k = _make_key(it)
+        if not k or k in seen:
+            continue
+        seen.add(k)
+        deduped.append(it)
+        if len(deduped) >= limit:
+            break
+    raw_items = deduped
 
-    # Save all items as 'browsed' in history (optional: dedupe by url/title)
+    # Save all items as 'browsed' in history and add region
     for item in raw_items:
+        item["region"] = region
         save_news_history(item, action="browsed")
 
     # Build expert verification map for items
-    def _make_key(it: dict) -> str:
-        return (it.get("url") or it.get("title") or "").strip()
 
     keys = [ _make_key(i) for i in raw_items if _make_key(i) ]
     expert_map = {}
@@ -403,7 +475,18 @@ def trending_live():
         news_key = _make_key(item)
         
         # Check for cached verification (with 1hr expiry)
-        cached = get_news_verification(news_key, agent) if news_key else None
+        cached = None
+        used_agent_for_cache = agent
+        if news_key:
+            if agent == "auto":
+                for candidate in ["gemini", "openai", "hf"]:
+                    c = get_news_verification(news_key, candidate)
+                    if c and not is_verification_expired(c["verified_at"]):
+                        cached = c
+                        used_agent_for_cache = candidate
+                        break
+            else:
+                cached = get_news_verification(news_key, agent)
         ai_result = {}
         
         if cached and not is_verification_expired(cached["verified_at"]):
@@ -412,16 +495,19 @@ def trending_live():
                 "status": cached["status"],
                 "summary": cached["summary"],
                 "confidence": cached["confidence"],
-                "cached": True
+                "cached": True,
+                "agent": used_agent_for_cache,
+                "agent_used": used_agent_for_cache
             }
         elif verify_claim_with_ai and claim:
             # Verify with AI and cache result
             try:
                 ai_result = verify_claim_with_ai(claim, agent=agent)
                 if news_key and ai_result.get("status"):
+                    model_to_cache = ai_result.get("agent_used") or ai_result.get("agent") or agent
                     set_news_verification(
-                        news_key, 
-                        agent, 
+                        news_key,
+                        model_to_cache,
                         ai_result.get("status", "Needs Verification"),
                         ai_result.get("summary", ""),
                         ai_result.get("confidence", 50)
@@ -474,13 +560,18 @@ def save_expert_verification():
     )
     conn.commit()
     conn.close()
+    # Invalidate cached stats since expert verifications affect verified counts
+    try:
+        _response_cache["stats"]["ts"] = 0.0
+    except Exception:
+        pass
     return jsonify({"key": key, "status": status, "notes": notes, "updated_at": now})
 
 @app.route("/api/verify", methods=["POST"])
 def verify_claim_route():
     data = request.json or {}
     claim = data.get("claim")
-    agent = data.get("agent", "openai")  # ← get selected agent
+    agent = data.get("agent", "gemini")  # ← get selected agent
     if not claim:
         return jsonify({"error": "No claim provided"}), 400
 
@@ -550,6 +641,12 @@ def news_action():
     # Update top trending after like action
     if action == "like":
         update_top_trending()
+        # Invalidate caches influenced by likes
+        try:
+            _response_cache["trending_top"]["ts"] = 0.0
+            _response_cache["stats"]["ts"] = 0.0
+        except Exception:
+            pass
     
     return jsonify({"news_key": news_key, "action": action, "counts": counts})
 
@@ -565,9 +662,16 @@ def get_actions(news_key):
 @app.route("/api/trending/top", methods=["GET"])
 def get_top_trending_news():
     """Get top 5 trending news from cache."""
-    # Update the cache before fetching
+    now = time.time()
+    cache_item = _response_cache.get("trending_top", {"data": None, "ts": 0.0})
+    # Serve from cache if fresh
+    if cache_item["data"] is not None and (now - cache_item["ts"]) < TRENDING_TOP_TTL:
+        return jsonify(cache_item["data"]) 
+
+    # Refresh DB-backed cache and store response
     update_top_trending()
     trending = get_top_trending()
+    _response_cache["trending_top"] = {"data": trending, "ts": now}
     return jsonify(trending)
 
 
@@ -575,6 +679,11 @@ def get_top_trending_news():
 @app.route("/api/stats", methods=["GET"])
 def get_stats():
     """Get dashboard statistics."""
+    now = time.time()
+    cache_item = _response_cache.get("stats", {"data": None, "ts": 0.0})
+    if cache_item["data"] is not None and (now - cache_item["ts"]) < STATS_TTL:
+        return jsonify(cache_item["data"]) 
+
     conn = get_db_connection()
     c = conn.cursor()
     
@@ -601,12 +710,14 @@ def get_stats():
     
     conn.close()
     
-    return jsonify({
+    payload = {
         "verified": verified_count,
         "trending": trending_today,
         "users": active_users,
         "fact_checks": fact_checks
-    })
+    }
+    _response_cache["stats"] = {"data": payload, "ts": now}
+    return jsonify(payload)
 
 
 # --- On-Demand Verification API ---
@@ -618,7 +729,7 @@ def verify_news_item():
     data = request.json or {}
     news_key = (data.get("news_key") or "").strip()
     title = (data.get("title") or "").strip()
-    agent = data.get("agent", "openai")
+    agent = data.get("agent", "gemini")
     
     if not news_key or not title:
         return jsonify({"error": "Invalid news_key or title"}), 400

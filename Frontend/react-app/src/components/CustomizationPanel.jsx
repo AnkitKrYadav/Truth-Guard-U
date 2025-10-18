@@ -33,6 +33,45 @@ function CustomizationPanel() {
           Show confidence levels in results
         </label>
       </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-gray-700 dark:text-gray-300 font-medium mb-1">Default Region</label>
+          <select
+            value={userPrefs.defaultRegion || "in"}
+            onChange={(e) => updatePrefs({ defaultRegion: e.target.value })}
+            className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600"
+          >
+            {['in','us','gb','au','ca','de','fr','jp'].map(r => (
+              <option key={r} value={r}>{r.toUpperCase()}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-gray-700 dark:text-gray-300 font-medium mb-1">Default Model</label>
+          <select
+            value={userPrefs.defaultModel || "openai"}
+            onChange={(e) => updatePrefs({ defaultModel: e.target.value })}
+            className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600"
+          >
+            <option value="openai">OpenAI</option>
+            <option value="hf">HuggingFace</option>
+          </select>
+        </div>
+      </div>
+
+      <div>
+        <label className="flex items-center gap-2 text-gray-700 dark:text-gray-300 font-medium">
+          <input
+            type="checkbox"
+            checked={userPrefs.compactCards || false}
+            onChange={(e) => updatePrefs({ compactCards: e.target.checked })}
+            className="rounded"
+          />
+          Compact cards layout
+        </label>
+      </div>
     </div>
   );
 }

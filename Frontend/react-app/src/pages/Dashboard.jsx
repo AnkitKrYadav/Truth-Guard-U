@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import StatsWidget from "../components/StatsWidget";
 import NewsCard from "../components/NewsCard";
 import axios from "axios";
@@ -8,8 +8,12 @@ const Dashboard = () => {
   const [trendingNews, setTrendingNews] = useState([]);
   const [stats, setStats] = useState([]);
   const [loading, setLoading] = useState(true);
+  const didFetchRef = useRef(false); // Guard double fetch in React StrictMode (dev)
 
   useEffect(() => {
+    if (didFetchRef.current) return; // prevent duplicate calls in dev
+    didFetchRef.current = true;
+
     async function fetchData() {
       try {
         // Fetch top trending news from database (not live API)
