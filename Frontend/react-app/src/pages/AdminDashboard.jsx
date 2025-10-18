@@ -38,11 +38,16 @@ const AdminDashboard = () => {
           axios.get(`${API_BASE_URL}/api/admin/regions`),
           axios.get(`${API_BASE_URL}/api/admin/categories`),
         ]);
-        setUsers(usersRes.data);
-        setExperts(expertsRes.data);
-        setBadges(badgesRes.data);
-        setRegions(regionsRes.data);
-        setCategories(catsRes.data);
+        const u = Array.isArray(usersRes.data) ? usersRes.data : [];
+        const e = Array.isArray(expertsRes.data) ? expertsRes.data : [];
+        const b = Array.isArray(badgesRes.data) ? badgesRes.data : [];
+        const r = Array.isArray(regionsRes.data) ? regionsRes.data : [];
+        const c = Array.isArray(catsRes.data) ? catsRes.data : [];
+        setUsers(u);
+        setExperts(e);
+        setBadges(b);
+        setRegions(r);
+        setCategories(c);
       } catch (err) {
         // eslint-disable-next-line
         console.error("Admin fetch error:", err);
@@ -81,7 +86,7 @@ const AdminDashboard = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {users.map(u => (
+                  {(Array.isArray(users) ? users : []).map(u => (
                     <tr key={u.id}>
                       <td className="px-3 py-2">{u.id}</td>
                       <td className="px-3 py-2">{u.username}</td>
@@ -111,7 +116,7 @@ const AdminDashboard = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {experts.map(e => (
+                  {(Array.isArray(experts) ? experts : []).map(e => (
                     <tr key={e.id}>
                       <td className="px-3 py-2">{e.id}</td>
                       <td className="px-3 py-2">{e.username}</td>
@@ -130,7 +135,7 @@ const AdminDashboard = () => {
           <section>
             <h2 className="text-xl font-semibold mb-2">Badges</h2>
             <ul className="list-disc pl-6">
-              {badges.map(b => (
+              {(Array.isArray(badges) ? badges : []).map(b => (
                 <li key={b.id} className="mb-1">
                   <span className="font-semibold" style={{ color: b.color }}>{b.name}</span>: {b.description}
                 </li>
@@ -141,7 +146,7 @@ const AdminDashboard = () => {
           <section>
             <h2 className="text-xl font-semibold mb-2">Regions</h2>
             <div className="flex flex-wrap gap-2">
-              {regions.map(r => (
+              {(Array.isArray(regions) ? regions : []).map(r => (
                 <span key={r} className="px-3 py-1 rounded bg-blue-100 text-blue-800 font-medium">{r.toUpperCase()}</span>
               ))}
             </div>
@@ -150,7 +155,7 @@ const AdminDashboard = () => {
           <section>
             <h2 className="text-xl font-semibold mb-2">Categories</h2>
             <div className="flex flex-wrap gap-2">
-              {categories.map(c => (
+              {(Array.isArray(categories) ? categories : []).map(c => (
                 <span key={c} className="px-3 py-1 rounded bg-green-100 text-green-800 font-medium">{c}</span>
               ))}
             </div>

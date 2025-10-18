@@ -48,11 +48,21 @@ static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Fro
 app = Flask(__name__, static_folder=os.path.abspath(static_dir))
 
 # Restrictive CORS in production, permissive in local dev
-allowed_origin = os.getenv("ALLOWED_ORIGIN")
-if allowed_origin:
-    CORS(app, resources={r"/api/*": {"origins": allowed_origin}})
+# Supports comma-separated ALLOWED_ORIGINS, or single ALLOWED_ORIGIN for backward compatibility
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS") or os.getenv("ALLOWED_ORIGIN")
+if allowed_origins_env:
+    origins = [o.strip() for o in allowed_origins_env.split(",") if o.strip()]
+    CORS(
+        app,
+        resources={r"/api/*": {
+            "origins": origins if len(origins) > 1 else origins[0],
+            "allow_headers": ["Content-Type", "X-Admin-Key"],
+            "methods": ["GET", "POST", "OPTIONS"],
+        }}
+    )
 else:
-    CORS(app)  # fallback for local/dev
+    # Dev fallback: allow all origins and headers under /api/*
+    CORS(app, resources={r"/api/*": {"origins": "*", "allow_headers": ["*"], "methods": ["GET", "POST", "OPTIONS"]}})
 
 # Database path
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -540,6 +550,12 @@ def trending_live():
 
 @app.route("/api/expert-verifications", methods=["POST"])
 def save_expert_verification():
+    # Optional admin key guard: if ADMIN_KEY is set, require matching header
+    admin_key = os.getenv("ADMIN_KEY")
+    if admin_key:
+        provided = request.headers.get("X-Admin-Key", "")
+        if provided != admin_key:
+            return jsonify({"error": "Unauthorized"}), 401
     data = request.json or {}
     key = (data.get("key") or "").strip()
     status = (data.get("status") or "").strip()
@@ -619,6 +635,81 @@ def get_news_history():
     rows = conn.execute("SELECT * FROM news_history ORDER BY created_at DESC LIMIT 100").fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
+
+
+# --- Simple Admin helper endpoints (for frontend compatibility) ---
+@app.route("/api/admin/categories", methods=["GET"])
+def admin_categories():
+    # Return only raw categories (no "All")
+    conn = get_db_connection()
+    rows = conn.execute("SELECT DISTINCT category FROM news WHERE category IS NOT NULL AND category <> ''").fetchall()
+    conn.close()
+    return jsonify([r[0] if isinstance(r, tuple) else r["category"] for r in rows])
+
+
+@app.route("/api/admin/regions", methods=["GET"])
+def admin_regions():
+    # Provide a basic list of regions; adjust as needed or source from DB/env
+    regions = [
+        "all", "in", "us", "gb", "au", "ca", "de", "fr", "jp", "ru", "cn"
+    ]
+    return jsonify(regions)
+
+
+@app.route("/api/admin/users", methods=["GET"])
+def admin_users():
+    conn = get_db_connection()
+    rows = conn.execute(
+        "SELECT id, username, email, is_active, created_at FROM users ORDER BY created_at DESC LIMIT 200"
+    ).fetchall()
+    conn.close()
+    # Ensure list of dicts
+    return jsonify([{
+        "id": r[0] if isinstance(r, tuple) else r["id"],
+        "username": r[1] if isinstance(r, tuple) else r["username"],
+        "email": r[2] if isinstance(r, tuple) else r["email"],
+        "is_active": (r[3] if isinstance(r, tuple) else r["is_active"]) == 1 if isinstance((r[3] if isinstance(r, tuple) else r["is_active"]), int) else (r[3] if isinstance(r, tuple) else r["is_active"]),
+        "created_at": r[4] if isinstance(r, tuple) else r["created_at"],
+    } for r in rows])
+
+
+@app.route("/api/admin/experts", methods=["GET"])
+def admin_experts():
+    conn = get_db_connection()
+    rows = conn.execute(
+        """
+        SELECT e.id, u.username, e.full_name, e.organization, e.badge_id, e.is_verified, e.verified_at
+        FROM experts e
+        LEFT JOIN users u ON u.id = e.user_id
+        ORDER BY e.id DESC
+        LIMIT 200
+        """
+    ).fetchall()
+    conn.close()
+    return jsonify([{
+        "id": r[0] if isinstance(r, tuple) else r["id"],
+        "username": r[1] if isinstance(r, tuple) else r["username"],
+        "full_name": r[2] if isinstance(r, tuple) else r["full_name"],
+        "organization": r[3] if isinstance(r, tuple) else r["organization"],
+        "badge_id": r[4] if isinstance(r, tuple) else r["badge_id"],
+        "is_verified": (r[5] if isinstance(r, tuple) else r["is_verified"]) == 1 if isinstance((r[5] if isinstance(r, tuple) else r["is_verified"]), int) else (r[5] if isinstance(r, tuple) else r["is_verified"]),
+        "verified_at": r[6] if isinstance(r, tuple) else r["verified_at"],
+    } for r in rows])
+
+
+@app.route("/api/admin/badges", methods=["GET"])
+def admin_badges():
+    conn = get_db_connection()
+    rows = conn.execute(
+        "SELECT id, name, color, description FROM badges ORDER BY id DESC LIMIT 200"
+    ).fetchall()
+    conn.close()
+    return jsonify([{
+        "id": r[0] if isinstance(r, tuple) else r["id"],
+        "name": r[1] if isinstance(r, tuple) else r["name"],
+        "color": r[2] if isinstance(r, tuple) else r["color"],
+        "description": r[3] if isinstance(r, tuple) else r["description"],
+    } for r in rows])
 
 
 # --- News Actions API (Like/Dislike/Bookmark) ---

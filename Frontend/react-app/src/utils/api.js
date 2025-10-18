@@ -8,7 +8,13 @@ export const postVerify = (claim, agent = "openai") => {
 };
 
 export const postExpertVerification = (key, status, notes) => {
-  return axios.post(`${API_BASE_URL}/api/expert-verifications`, { key, status, notes });
+  let adminKey = "";
+  try { adminKey = localStorage.getItem('tg_admin_key') || ""; } catch {}
+  return axios.post(
+    `${API_BASE_URL}/api/expert-verifications`,
+    { key, status, notes },
+    { headers: adminKey ? { 'X-Admin-Key': adminKey } : {} }
+  );
 };
 
 const client = axios.create({

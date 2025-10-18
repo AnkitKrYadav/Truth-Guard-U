@@ -1,6 +1,9 @@
 import os
 import requests
+import logging
 from typing import List, Dict
+
+logger = logging.getLogger("news_api")
 
 
 def _categorize(title: str) -> str:
@@ -44,13 +47,18 @@ def fetch_newsapi_top_headlines(country: str = "in", page_size: int = 10) -> Lis
     """Fetch top headlines from NewsAPI.org. Requires NEWS_API_KEY env var."""
     api_key = os.getenv("NEWS_API_KEY")
     if not api_key:
+        logger.warning("NEWS_API_KEY not set; skipping NewsAPI fetch")
         return []
     url = "https://newsapi.org/v2/top-headlines"
     params = {"country": country, "pageSize": page_size, "apiKey": api_key}
     try:
         resp = requests.get(url, params=params, timeout=10)
+        if resp.status_code != 200:
+            logger.warning("NewsAPI non-200 status %s: %s", resp.status_code, resp.text[:200])
         resp.raise_for_status()
         articles = resp.json().get("articles", [])
+        if not articles:
+            logger.info("NewsAPI returned 0 articles for country=%s", country)
         items = []
         for a in articles:
             title = a.get("title") or ""
@@ -62,7 +70,8 @@ def fetch_newsapi_top_headlines(country: str = "in", page_size: int = 10) -> Lis
                 "category": _categorize(title)
             })
         return items
-    except Exception:
+    except Exception as e:
+        logger.exception("NewsAPI fetch failed: %s", e)
         return []
 
 
@@ -73,9 +82,13 @@ def fetch_reddit_trending(subreddit: str = "news", limit: int = 10) -> List[Dict
     headers = {"User-Agent": "TruthGuardBot/1.0 (by u/yourbot)"}
     try:
         resp = requests.get(url, params=params, headers=headers, timeout=10)
+        if resp.status_code != 200:
+            logger.warning("Reddit non-200 status %s: %s", resp.status_code, resp.text[:200])
         resp.raise_for_status()
         data = resp.json()
         children = data.get("data", {}).get("children", [])
+        if not children:
+            logger.info("Reddit returned 0 posts for subreddit=%s", subreddit)
         items = []
         for c in children:
             d = c.get("data", {})
@@ -88,7 +101,8 @@ def fetch_reddit_trending(subreddit: str = "news", limit: int = 10) -> List[Dict
                 "category": _categorize(title)
             })
         return items
-    except Exception:
+    except Exception as e:
+        logger.exception("Reddit fetch failed: %s", e)
         return []
 
 
@@ -148,4 +162,6 @@ def fetch_trending_mix(limit_per_source: int = 10, region: str = "in") -> List[D
         if t and t.lower() not in seen:
             seen.add(t.lower())
             unique.append(it)
+    if not unique:
+        logger.warning("fetch_trending_mix returned 0 items (region=%s, limit_per_source=%s)", region, limit_per_source)
     return unique
