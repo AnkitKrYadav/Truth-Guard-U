@@ -5,7 +5,7 @@ from flask_cors import CORS
 import sqlite3
 import os
 from dotenv import load_dotenv, find_dotenv
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 import time
 # Avoid printing secrets to logs
@@ -230,7 +230,7 @@ def save_news_history(item, action="browsed"):
             item.get("summary"),
             item.get("category"),
             action,
-            datetime.utcnow().isoformat(),
+            datetime.now(timezone.utc).isoformat(),
         ),
     )
     conn.commit()
@@ -261,7 +261,7 @@ def set_news_verification(news_key, model, status, summary, confidence):
     """Cache verification result for a news item and model."""
     conn = get_db_connection()
     c = conn.cursor()
-    verified_at = datetime.utcnow().isoformat()
+    verified_at = datetime.now(timezone.utc).isoformat()
     c.execute(
         """
         INSERT OR REPLACE INTO news_verifications (news_key, model, status, summary, confidence, verified_at)
@@ -277,7 +277,7 @@ def is_verification_expired(verified_at_str, expiry_hours=1):
     """Check if verification is older than expiry_hours."""
     try:
         verified_at = datetime.fromisoformat(verified_at_str)
-        age = datetime.utcnow() - verified_at
+        age = datetime.now(timezone.utc) - verified_at
         return age.total_seconds() > expiry_hours * 3600
     except Exception:
         return True  # treat as expired if parsing fails
@@ -287,7 +287,7 @@ def add_news_action(news_key, user_id, action):
     """Add a like/dislike/bookmark action for a news item."""
     conn = get_db_connection()
     c = conn.cursor()
-    created_at = datetime.utcnow().isoformat()
+    created_at = datetime.now(timezone.utc).isoformat()
     c.execute(
         """
         INSERT INTO news_likes (news_key, user_id, action, created_at)
@@ -338,7 +338,7 @@ def update_top_trending():
     c.execute("DELETE FROM top_trending_news")
     
     # Insert top trending news
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     for item in top_news:
         news_key = item["news_key"]
         like_count = item["like_count"]
@@ -547,7 +547,7 @@ def save_expert_verification():
     if not key or status not in ("True", "False", "Needs Verification"):
         return jsonify({"error": "Invalid key or status"}), 400
 
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     conn = get_db_connection()
     c = conn.cursor()
     c.execute(
@@ -693,7 +693,7 @@ def get_stats():
     ).fetchone()[0]
     
     # Trending today (from news_history created today)
-    today = datetime.utcnow().date().isoformat()
+    today = datetime.now(timezone.utc).date().isoformat()
     trending_today = c.execute(
         f"SELECT COUNT(*) FROM news_history WHERE created_at LIKE '{today}%'"
     ).fetchone()[0]
