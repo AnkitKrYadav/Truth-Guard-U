@@ -5,6 +5,8 @@ from flask_cors import CORS
 import sqlite3
 import os
 from dotenv import load_dotenv
+import os
+print("OPENAI KEY (Render):", os.getenv("OPENAI_API_KEY")[:15])
 
 # Load environment variables
 load_dotenv()
