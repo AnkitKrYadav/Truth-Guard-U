@@ -144,8 +144,10 @@ def verify_claim_with_ai(claim: str) -> Dict[str, Any]:
     """
 
     try:
-        from langchain.chat_models import ChatOpenAI
+        from langchain_openai import ChatOpenAI
         from langchain.schema import HumanMessage
+
+        print("trying langchain")
 
         llm = ChatOpenAI(api_key=OPENAI_API_KEY, model_name=OPENAI_MODEL, temperature=0.2)
         response = llm([HumanMessage(content=prompt)])
