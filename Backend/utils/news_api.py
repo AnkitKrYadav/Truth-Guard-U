@@ -74,11 +74,53 @@ def fetch_reddit_trending(subreddit: str = "news", limit: int = 10) -> List[Dict
         return []
 
 
-def fetch_trending_mix(limit_per_source: int = 10) -> List[Dict]:
-    """Combine multiple sources into a single list."""
+
+# --- Social Media Stubs (mock data, real API integration requires setup) ---
+def fetch_twitter_trending(region: str = "in", limit: int = 10) -> List[Dict]:
+    # TODO: Integrate Twitter/X API (requires dev account)
+    # For now, return mock data
+    return [
+        {
+            "title": f"Trending on Twitter in {region} #{i+1}",
+            "source": "Twitter",
+            "summary": f"Sample trending tweet {i+1} in {region}.",
+            "url": None,
+            "category": "General"
+        } for i in range(limit)
+    ]
+
+def fetch_facebook_trending(region: str = "in", limit: int = 10) -> List[Dict]:
+    # TODO: Integrate Facebook Graph API
+    return [
+        {
+            "title": f"Facebook hot topic {i+1} in {region}",
+            "source": "Facebook",
+            "summary": f"Sample Facebook post {i+1} in {region}.",
+            "url": None,
+            "category": "General"
+        } for i in range(limit)
+    ]
+
+def fetch_instagram_trending(region: str = "in", limit: int = 10) -> List[Dict]:
+    # TODO: Integrate Instagram API
+    return [
+        {
+            "title": f"Instagram trend {i+1} in {region}",
+            "source": "Instagram",
+            "summary": f"Sample Instagram post {i+1} in {region}.",
+            "url": None,
+            "category": "General"
+        } for i in range(limit)
+    ]
+
+def fetch_trending_mix(limit_per_source: int = 10, region: str = "in") -> List[Dict]:
+    """Combine multiple sources into a single list. Region is a country code (e.g. 'in', 'us')."""
     items = []
-    items += fetch_newsapi_top_headlines(page_size=limit_per_source)
+    items += fetch_newsapi_top_headlines(country=region, page_size=limit_per_source)
     items += fetch_reddit_trending(limit=limit_per_source)
+    items += fetch_twitter_trending(region=region, limit=limit_per_source)
+    items += fetch_facebook_trending(region=region, limit=limit_per_source)
+    items += fetch_instagram_trending(region=region, limit=limit_per_source)
     # de-duplicate by title
     seen = set()
     unique = []

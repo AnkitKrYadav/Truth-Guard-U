@@ -7,6 +7,10 @@ export const postVerify = (claim, agent = "openai") => {
   return axios.post(`${API_BASE_URL}/api/verify`, { claim, agent });
 };
 
+export const postExpertVerification = (key, status, notes) => {
+  return axios.post(`${API_BASE_URL}/api/expert-verifications`, { key, status, notes });
+};
+
 const client = axios.create({
   baseURL: API_BASE_URL,
 });

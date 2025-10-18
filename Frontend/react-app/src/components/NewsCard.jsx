@@ -1,6 +1,6 @@
 import React from "react";
 
-const NewsCard = ({ title, source, summary, category }) => {
+const NewsCard = ({ title, source, summary, category, url }) => {
   const categoryColors = {
     Politics: "bg-red-200 text-red-800",
     Health: "bg-green-200 text-green-800",
@@ -21,7 +21,13 @@ const NewsCard = ({ title, source, summary, category }) => {
         </span>
       )}
 
-      <h3 className="font-bold text-lg mb-2">{title}</h3>
+      {url ? (
+        <a href={url} target="_blank" rel="noopener noreferrer" className="font-bold text-lg mb-2 hover:underline">
+          {title}
+        </a>
+      ) : (
+        <h3 className="font-bold text-lg mb-2">{title}</h3>
+      )}
       {source && <p className="text-sm text-gray-500 mb-2">Source: {source}</p>}
       {summary && <p className="text-gray-700 dark:text-gray-300">{summary}</p>}
     </div>
