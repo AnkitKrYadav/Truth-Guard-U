@@ -1,9 +1,9 @@
-openai==2.4.0
-langchain==0.3.27
-langchain-openai==0.3.35
 flask==2.2.5
 flask-cors==3.0.10
 requests==2.31.0
 python-dotenv==1.0.0
+openai==2.4.0
+langchain==0.3.27
+langchain-openai==0.3.35
 pymongo==4.15.3
 newsapi-python==0.2.7
