@@ -13,11 +13,23 @@ const Trending = () => {
   useEffect(() => {
     async function fetchData() {
       try {
-  const newsRes = await axios.get(`${API_BASE_URL}/api/trending`);
-        setTrendingNews(newsRes.data);
+        // Prefer live mixed trending with verification
+        const newsRes = await axios.get(`${API_BASE_URL}/api/trending/live?agent=hf&limit=12`);
+        // Map into existing shape, but keep verification payload
+        const items = (newsRes.data || []).map((n) => ({
+          id: n.id || n.url || n.title,
+          title: n.title,
+          source: n.source,
+          summary: n.summary,
+          category: n.category || "General",
+          url: n.url,
+          verification: n.verification,
+        }));
+        setTrendingNews(items);
 
-  const catRes = await axios.get(`${API_BASE_URL}/api/categories`);
-        setCategories(catRes.data);
+        // Derive categories from items
+        const derivedCats = ["All", ...Array.from(new Set(items.map(i => i.category).filter(Boolean)))];
+        setCategories(derivedCats);
       } catch (err) {
         console.error("Error fetching data:", err);
       } finally {
@@ -74,15 +86,28 @@ const statsData = [
         <p>Loading trending news...</p>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredNews.map((news) => (
-            <NewsCard
-              key={news.id}
-              title={news.title}
-              source={news.source}
-              summary={news.summary}
-              category={news.category}
-            />
-          ))}
+          {filteredNews.map((news) => {
+            const v = news.verification || {};
+            const status = v.status;
+            const conf = v.confidence;
+            return (
+              <div key={news.id} className="relative">
+                {status && (
+                  <span className={`absolute top-2 right-2 text-xs font-semibold px-2 py-1 rounded-full ${
+                    status === 'True' ? 'bg-green-200 text-green-800' : status === 'False' ? 'bg-red-200 text-red-800' : 'bg-yellow-200 text-yellow-800'
+                  }`}>
+                    {status}{conf !== undefined ? ` • ${conf}%` : ''}
+                  </span>
+                )}
+                <NewsCard
+                  title={news.title}
+                  source={news.source}
+                  summary={news.summary}
+                  category={news.category}
+                />
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

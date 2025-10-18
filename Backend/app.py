@@ -5,6 +5,7 @@ from flask_cors import CORS
 import sqlite3
 import os
 from dotenv import load_dotenv
+from datetime import datetime
 import os
 # Avoid printing secrets to logs
 # print("OPENAI KEY (Render):", os.getenv("OPENAI_API_KEY")[:15])
@@ -75,6 +76,19 @@ def init_db():
         """
     )
 
+    # Expert verifications table
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS expert_verifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            key TEXT UNIQUE NOT NULL,
+            status TEXT NOT NULL,
+            notes TEXT,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+
     # Insert sample data if table is empty
     existing = c.execute("SELECT COUNT(*) as cnt FROM news").fetchone()[0]
     if existing == 0:
@@ -98,6 +112,10 @@ try:
     from ai_agent import verify_claim_with_ai
 except Exception:
     verify_claim_with_ai = None
+try:
+    from utils.news_api import fetch_trending_mix
+except Exception:
+    fetch_trending_mix = None
 
 # --------- API Routes ---------
 @app.route("/api/trending")
@@ -114,6 +132,90 @@ def categories():
     conn.close()
     category_list = ["All"] + [c["category"] for c in cats]
     return jsonify(category_list)
+
+@app.route("/api/trending/live")
+def trending_live():
+    """Fetch live trending items from mixed sources and verify them with AI.
+    Query params:
+      - agent: openai | hf (default openai)
+      - limit: int (default 10)
+    """
+    agent = request.args.get("agent", "openai")
+    try:
+        limit = int(request.args.get("limit", 10))
+    except Exception:
+        limit = 10
+
+    if not fetch_trending_mix:
+        return jsonify({"error": "Trending fetcher not available"}), 500
+
+    raw_items = fetch_trending_mix(limit_per_source=max(1, limit // 2))
+    raw_items = raw_items[:limit]
+
+    # Build expert verification map for items
+    def _make_key(it: dict) -> str:
+        return (it.get("url") or it.get("title") or "").strip()
+
+    keys = [ _make_key(i) for i in raw_items if _make_key(i) ]
+    expert_map = {}
+    if keys:
+        conn = get_db_connection()
+        q_marks = ",".join(["?"] * len(keys))
+        rows = conn.execute(f"SELECT key, status, notes, updated_at FROM expert_verifications WHERE key IN ({q_marks})", keys).fetchall()
+        conn.close()
+        expert_map = { r["key"]: {"status": r["status"], "notes": r["notes"], "updated_at": r["updated_at"]} for r in rows }
+
+    results = []
+    for item in raw_items:
+        claim = item.get("title") or ""
+        ai_result = {}
+        if verify_claim_with_ai and claim:
+            try:
+                ai_result = verify_claim_with_ai(claim, agent=agent)
+            except Exception as e:
+                print("verify error:", e)
+                ai_result = {"status": "Needs Verification", "summary": str(e), "confidence": 50}
+
+        # add expert override info if available
+        k = (item.get("url") or item.get("title") or "").strip()
+        expert = expert_map.get(k)
+        if expert:
+            ai_result = { **ai_result, "expert": expert }
+        results.append({
+            "title": item.get("title"),
+            "source": item.get("source"),
+            "summary": item.get("summary"),
+            "url": item.get("url"),
+            "category": item.get("category", "General"),
+            "verification": ai_result,
+        })
+
+    return jsonify(results)
+
+
+@app.route("/api/expert-verifications", methods=["POST"])
+def save_expert_verification():
+    data = request.json or {}
+    key = (data.get("key") or "").strip()
+    status = (data.get("status") or "").strip()
+    notes = data.get("notes")
+    if not key or status not in ("True", "False", "Needs Verification"):
+        return jsonify({"error": "Invalid key or status"}), 400
+
+    now = datetime.utcnow().isoformat()
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute(
+        """
+        INSERT INTO expert_verifications (key, status, notes, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET status=excluded.status, notes=excluded.notes, updated_at=excluded.updated_at
+        """,
+        (key, status, notes, now),
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({"key": key, "status": status, "notes": notes, "updated_at": now})
 
 @app.route("/api/verify", methods=["POST"])
 def verify_claim_route():
