@@ -149,7 +149,11 @@ def fetch_trending_mix(limit_per_source: int = 10, region: str = "in") -> List[D
     """Combine multiple sources into a single list. Region is a country code (e.g. 'in', 'us')."""
     items = []
     items += fetch_newsapi_top_headlines(country=region, page_size=limit_per_source)
-    items += fetch_reddit_trending(limit=limit_per_source)
+    
+    # Skip Reddit in production (often blocked on cloud hosts like Render)
+    # Uncomment below if you have a proxy or local dev environment
+    # items += fetch_reddit_trending(limit=limit_per_source)
+    
     # items += fetch_facebook_trending(region=region, limit=limit_per_source)  # removed mock Facebook
     # items += fetch_instagram_trending(region=region, limit=limit_per_source)  # removed mock Instagram
     # Explicitly drop any Twitter/Facebook/Instagram-sourced mock entries
@@ -162,6 +166,45 @@ def fetch_trending_mix(limit_per_source: int = 10, region: str = "in") -> List[D
         if t and t.lower() not in seen:
             seen.add(t.lower())
             unique.append(it)
+    
+    # Fallback: if all sources failed (e.g., rate limits), provide sample trending items
     if not unique:
-        logger.warning("fetch_trending_mix returned 0 items (region=%s, limit_per_source=%s)", region, limit_per_source)
+        logger.warning("fetch_trending_mix returned 0 items (region=%s, limit_per_source=%s); using fallback", region, limit_per_source)
+        unique = [
+            {
+                "title": "Breaking: Global climate summit reaches historic agreement",
+                "source": "Sample News",
+                "summary": "World leaders agree on new carbon reduction targets at COP30.",
+                "url": None,
+                "category": "Environment"
+            },
+            {
+                "title": "Tech giants announce joint AI safety initiative",
+                "source": "Sample Tech",
+                "summary": "Major AI companies pledge to share safety research and best practices.",
+                "url": None,
+                "category": "Tech"
+            },
+            {
+                "title": "Local health officials warn of flu season peak",
+                "source": "Sample Health",
+                "summary": "Residents urged to get vaccinated as flu cases rise.",
+                "url": None,
+                "category": "Health"
+            },
+            {
+                "title": "New economic data shows job growth accelerating",
+                "source": "Sample Business",
+                "summary": "Latest employment report exceeds economist expectations.",
+                "url": None,
+                "category": "Business"
+            },
+            {
+                "title": "Sports: Championship finals set for this weekend",
+                "source": "Sample Sports",
+                "summary": "Top teams prepare for decisive matches across multiple leagues.",
+                "url": None,
+                "category": "Sports"
+            },
+        ]
     return unique

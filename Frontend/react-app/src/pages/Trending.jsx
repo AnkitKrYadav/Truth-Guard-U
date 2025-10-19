@@ -239,6 +239,19 @@ const Trending = () => {
       {/* News Cards */}
       {loading ? (
         <p>Loading trending news...</p>
+      ) : filteredNews.length === 0 ? (
+        <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-lg p-6 text-center">
+          <svg className="w-16 h-16 mx-auto mb-4 text-yellow-600 dark:text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">No Trending News Available</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
+            We're currently unable to fetch trending news. This may be due to API rate limits or temporary service issues.
+          </p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            Try again in a few minutes, or contact support if the issue persists.
+          </p>
+        </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredNews.map((news) => {
