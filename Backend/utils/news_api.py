@@ -197,15 +197,15 @@ def fetch_trending_mix(limit_per_source: int = 10, region: str = "in") -> List[D
             continue
         try:
             c.execute(
-                "INSERT OR IGNORE INTO news (title, category, source, summary, region) VALUES (?, ?, ?, ?, ?)",
-                (title, category, source, summary, region_val)
+                "INSERT OR IGNORE INTO news (title, category, source, summary, region, url) VALUES (?, ?, ?, ?, ?, ?)",
+                (title, category, source, summary, region_val, url)
             )
         except Exception as e:
             logger.warning(f"DB insert failed for news: {title[:40]}... {e}")
     conn.commit()
     # Query back trending news from DB
     rows = c.execute(
-        "SELECT title, category, source, summary, region FROM news WHERE region=? ORDER BY id DESC LIMIT ?",
+        "SELECT title, category, source, summary, region, url FROM news WHERE region=? ORDER BY id DESC LIMIT ?",
         (region_val, limit_per_source * 3)
     ).fetchall()
     conn.close()
@@ -221,7 +221,7 @@ def fetch_trending_mix(limit_per_source: int = 10, region: str = "in") -> List[D
                 "source": r[2] if isinstance(r, tuple) else r["source"],
                 "summary": r[3] if isinstance(r, tuple) else r["summary"],
                 "region": r[4] if isinstance(r, tuple) else r["region"],
-                "url": None
+                "url": r[5] if isinstance(r, tuple) else r["url"]
             })
     # Fallback: if DB is empty, provide sample trending items
     if not unique:
