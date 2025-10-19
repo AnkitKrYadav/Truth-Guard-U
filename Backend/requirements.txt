@@ -7,3 +7,5 @@ langchain-openai==0.3.35
 google-generativeai
 gunicorn==21.2.0
 werkzeug>=2.2.0
+PRAW==7.7.1
+tweepy==4.14.0

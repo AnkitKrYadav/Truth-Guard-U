@@ -2,6 +2,8 @@ import os
 import requests
 import logging
 from typing import List, Dict
+import sqlite3
+import praw
 
 logger = logging.getLogger("news_api")
 
@@ -108,6 +110,32 @@ def fetch_reddit_trending(subreddit: str = "news", limit: int = 10) -> List[Dict
 
 
 # --- Social Media Stubs (mock data, real API integration requires setup) ---
+def fetch_reddit_trending_oauth(subreddit: str = "news", limit: int = 10) -> List[Dict]:
+    client_id = os.getenv("REDDIT_CLIENT_ID")
+    client_secret = os.getenv("REDDIT_CLIENT_SECRET")
+    user_agent = os.getenv("REDDIT_USER_AGENT", "TruthGuard/1.0")
+    if not client_id or not client_secret:
+        logger.warning("Reddit API credentials not set; skipping Reddit fetch")
+        return []
+    try:
+        reddit = praw.Reddit(
+            client_id=client_id,
+            client_secret=client_secret,
+            user_agent=user_agent
+        )
+        items = []
+        for submission in reddit.subreddit(subreddit).hot(limit=limit):
+            items.append({
+                "title": submission.title,
+                "source": "Reddit",
+                "summary": submission.selftext[:200] if submission.selftext else "",
+                "url": f"https://reddit.com{submission.permalink}",
+                "category": _categorize(submission.title)
+            })
+        return items
+    except Exception as e:
+        logger.exception("Reddit OAuth fetch failed: %s", e)
+        return []
 def fetch_twitter_trending(region: str = "in", limit: int = 10) -> List[Dict]:
     # TODO: Integrate Twitter/X API (requires dev account)
     # For now, return mock data
@@ -146,30 +174,58 @@ def fetch_instagram_trending(region: str = "in", limit: int = 10) -> List[Dict]:
     ]
 
 def fetch_trending_mix(limit_per_source: int = 10, region: str = "in") -> List[Dict]:
-    """Combine multiple sources into a single list. Region is a country code (e.g. 'in', 'us')."""
+    """Fetch trending news from APIs, save to DB, and return deduped list."""
     items = []
     items += fetch_newsapi_top_headlines(country=region, page_size=limit_per_source)
-    
-    # Skip Reddit in production (often blocked on cloud hosts like Render)
-    # Uncomment below if you have a proxy or local dev environment
-    # items += fetch_reddit_trending(limit=limit_per_source)
-    
-    # items += fetch_facebook_trending(region=region, limit=limit_per_source)  # removed mock Facebook
-    # items += fetch_instagram_trending(region=region, limit=limit_per_source)  # removed mock Instagram
-    # Explicitly drop any Twitter/Facebook/Instagram-sourced mock entries
-    items = [it for it in items if (it.get("source") or "").lower() not in ("twitter", "facebook", "instagram")]
-    # de-duplicate by title
-    seen = set()
-    unique = []
+    items += fetch_reddit_trending_oauth(subreddit="news", limit=limit_per_source)
+    # TODO: Add Twitter fetcher here if keys are set
+    # items += fetch_twitter_trending_oauth(region=region, limit=limit_per_source)
+
+    # Save all fetched news to DB (deduped by title/url)
+    db_path = os.path.join(os.path.dirname(__file__), "..", "database", "news.db")
+    conn = sqlite3.connect(db_path)
+    c = conn.cursor()
     for it in items:
-        t = (it.get("title") or "").strip()
+        title = (it.get("title") or "").strip()
+        url = (it.get("url") or "").strip()
+        category = it.get("category") or "General"
+        source = it.get("source") or "Unknown"
+        summary = it.get("summary") or ""
+        region_val = region or "all"
+        # Deduplicate by title+source
+        if not title:
+            continue
+        try:
+            c.execute(
+                "INSERT OR IGNORE INTO news (title, category, source, summary, region) VALUES (?, ?, ?, ?, ?)",
+                (title, category, source, summary, region_val)
+            )
+        except Exception as e:
+            logger.warning(f"DB insert failed for news: {title[:40]}... {e}")
+    conn.commit()
+    # Query back trending news from DB
+    rows = c.execute(
+        "SELECT title, category, source, summary, region FROM news WHERE region=? ORDER BY id DESC LIMIT ?",
+        (region_val, limit_per_source * 3)
+    ).fetchall()
+    conn.close()
+    unique = []
+    seen = set()
+    for r in rows:
+        t = (r[0] if isinstance(r, tuple) else r["title"]).strip()
         if t and t.lower() not in seen:
             seen.add(t.lower())
-            unique.append(it)
-    
-    # Fallback: if all sources failed (e.g., rate limits), provide sample trending items
+            unique.append({
+                "title": r[0] if isinstance(r, tuple) else r["title"],
+                "category": r[1] if isinstance(r, tuple) else r["category"],
+                "source": r[2] if isinstance(r, tuple) else r["source"],
+                "summary": r[3] if isinstance(r, tuple) else r["summary"],
+                "region": r[4] if isinstance(r, tuple) else r["region"],
+                "url": None
+            })
+    # Fallback: if DB is empty, provide sample trending items
     if not unique:
-        logger.warning("fetch_trending_mix returned 0 items (region=%s, limit_per_source=%s); using fallback", region, limit_per_source)
+        logger.warning("fetch_trending_mix returned 0 items from DB; using fallback")
         unique = [
             {
                 "title": "Breaking: Global climate summit reaches historic agreement",
