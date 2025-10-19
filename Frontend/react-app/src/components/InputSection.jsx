@@ -46,7 +46,7 @@ function InputSection() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Paste a news headline, link, or claim..."
-          className="flex-grow focus:outline-none bg-transparent text-gray-800 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400"
+          className="flex-grow focus:outline-none bg-transparent text-gray-800 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-100"
         />
         <button
           onClick={handleVerify}

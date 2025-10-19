@@ -69,13 +69,13 @@ function Verify() {
           value={claim}
           onChange={(e) => setClaim(e.target.value)}
           placeholder="Enter news or claim to verify..."
-          className="flex-grow p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="flex-grow p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600"
         />
 
         <select
           value={selectedAgent}
           onChange={(e) => setSelectedAgent(e.target.value)}
-          className="p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600"
         >
           <option value="openai">TruthGPT (OpenAI)</option>
           <option value="hf">DeepFact (HuggingFace)</option>
