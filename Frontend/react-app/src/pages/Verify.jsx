@@ -27,7 +27,12 @@ function Verify() {
       setResult(res.data);
     } catch (err) {
       console.error(err);
-      setResult({ error: "Error verifying claim." });
+      // Check if it's a rate limit error (429)
+      if (err.response && err.response.status === 429) {
+        setResult({ error: "Please use another model." });
+      } else {
+        setResult({ error: "Error verifying claim." });
+      }
     } finally {
       setLoading(false);
     }

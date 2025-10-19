@@ -153,20 +153,39 @@ const Trending = () => {
   return (
     <div className="p-6 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 min-h-screen space-y-6">
       <div className="flex items-center justify-between">
-  <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Trending Topics</h1>
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Trending Topics</h1>
         <button
           onClick={fetchTrending}
-          className="ml-4 px-4 py-2 rounded bg-blue-600 text-white font-semibold hover:bg-blue-700 transition"
+          className="ml-4 inline-flex items-center justify-center h-10 w-10 rounded-full border border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100 hover:border-blue-300 transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
           disabled={loading}
+          aria-label="Refresh trending news"
         >
-          Refresh
+          <svg
+            className={`w-5 h-5 ${loading ? "animate-spin" : ""}`}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <polyline points="23 4 23 10 17 10" />
+            <polyline points="1 20 1 14 7 14" />
+            <path d="M3.51 9a9 9 0 0114.73-3.36L23 10" />
+            <path d="M20.49 15a9 9 0 01-14.73 3.36L1 14" />
+          </svg>
         </button>
       </div>
 
       {/* Stats Widgets */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         {statsData.map((stat, idx) => (
-          <StatsWidget key={idx} {...stat} />
+          <StatsWidget
+            key={idx}
+            {...stat}
+            className="fade-in-up"
+            style={{ animationDelay: `${idx * 70}ms` }}
+          />
         ))}
       </div>
 
@@ -177,7 +196,7 @@ const Trending = () => {
         {(() => {
           const catsWithNews = Array.from(new Set(trendingNews.map(n => n.category).filter(Boolean)));
           const catsToShow = ["All", ...catsWithNews];
-          return catsToShow.map((cat) => (
+          return catsToShow.map((cat, idx) => (
             <button
               key={cat}
               onClick={() => setFilter(cat)}
@@ -185,7 +204,8 @@ const Trending = () => {
                 filter === cat
                   ? "bg-blue-600 text-white"
                   : "bg-gray-200 text-gray-700 hover:bg-blue-500 hover:text-white"
-              }`}
+              } fade-in-up`}
+              style={{ animationDelay: `${idx * 40}ms` }}
             >
               {cat}
             </button>
@@ -211,25 +231,37 @@ const Trending = () => {
           <span className="text-sm text-gray-600 dark:text-gray-300">Model:</span>
           <button
             onClick={() => setAgent("auto")}
-            className={`px-3 py-1 rounded ${agent === "auto" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}`}
+            className={`px-3 py-1 rounded transition-colors duration-200 ${
+              agent === "auto" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-blue-500 hover:text-white"
+            } fade-in-up`}
+            style={{ animationDelay: "0ms" }}
           >
             Auto
           </button>
           <button
             onClick={() => setAgent("gemini")}
-            className={`px-3 py-1 rounded ${agent === "gemini" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}`}
+            className={`px-3 py-1 rounded transition-colors duration-200 ${
+              agent === "gemini" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-blue-500 hover:text-white"
+            } fade-in-up`}
+            style={{ animationDelay: "40ms" }}
           >
             Gemini
           </button>
           <button
             onClick={() => setAgent("openai")}
-            className={`px-3 py-1 rounded ${agent === "openai" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}`}
+            className={`px-3 py-1 rounded transition-colors duration-200 ${
+              agent === "openai" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-blue-500 hover:text-white"
+            } fade-in-up`}
+            style={{ animationDelay: "80ms" }}
           >
             OpenAI
           </button>
           <button
             onClick={() => setAgent("hf")}
-            className={`px-3 py-1 rounded ${agent === "hf" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}`}
+            className={`px-3 py-1 rounded transition-colors duration-200 ${
+              agent === "hf" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-blue-500 hover:text-white"
+            } fade-in-up`}
+            style={{ animationDelay: "120ms" }}
           >
             HuggingFace
           </button>
@@ -254,7 +286,7 @@ const Trending = () => {
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredNews.map((news) => {
+          {filteredNews.map((news, idx) => {
             const v = news.verification || {};
             const status = v.status;
             const conf = v.confidence;
@@ -297,7 +329,8 @@ const Trending = () => {
             return (
               <div
                 key={news.id}
-                className="flex flex-col gap-2 border border-gray-200 dark:border-gray-700 rounded-xl p-4 bg-white dark:bg-gray-900 shadow-sm"
+                className="flex flex-col gap-2 border border-gray-200 dark:border-gray-700 rounded-xl p-4 bg-white dark:bg-gray-900 shadow-sm fade-in-up"
+                style={{ animationDelay: `${idx * 60}ms` }}
               >
                 {status && (
                   <div className={`flex flex-wrap items-center gap-2 mb-2`}>

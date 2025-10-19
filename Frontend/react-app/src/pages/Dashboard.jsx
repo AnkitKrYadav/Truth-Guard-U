@@ -43,7 +43,12 @@ const Dashboard = () => {
       {/* Stats Section */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {stats.map((stat, idx) => (
-          <StatsWidget key={idx} {...stat} />
+          <StatsWidget
+            key={idx}
+            {...stat}
+            className="fade-in-up"
+            style={{ animationDelay: `${idx * 70}ms` }}
+          />
         ))}
       </div>
 
@@ -60,7 +65,9 @@ const Dashboard = () => {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {trendingNews.map((news, idx) => (
-              <NewsCard key={idx} {...news} />
+              <div key={idx} className="fade-in-up" style={{ animationDelay: `${idx * 80}ms` }}>
+                <NewsCard {...news} />
+              </div>
             ))}
           </div>
         )}
