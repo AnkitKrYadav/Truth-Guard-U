@@ -174,34 +174,17 @@ def openai_agent(claim: str) -> Dict[str, Any]:
         # Use invoke() per LangChain deprecation notice
         resp = llm.invoke([HumanMessage(content=prompt)])
         data = _safe_json_parse(resp.content if hasattr(resp, "content") else str(resp))
-
         if not data:
             data = {"status": "Needs Verification", "summary": "AI could not parse.", "sources": []}
         return data
     except Exception as e:
-                # Normalize and inspect error to detect quota/rate-limit conditions
-        err_text = str(e)
-        low = err_text.lower()
-        _logger.warning("OpenAI agent failed: %s", err_text)
+        _logger.warning("OpenAI agent failed: %s", e)
 
-        # Common signals from OpenAI/SDKs: 429, rate_limit, insufficient_quota
-        if "429" in low or "rate limit" in low or "insufficient_quota" in low:
-            return {
-                "status": "Needs Verification",
-                "summary": "OpenAI quota/rate limit reached. Please switch to another model (Gemini or HuggingFace) or try again later.",
-                "sources": [],
-                "confidence": 50,
-                "error_code": 429,
-            }
+        if "429" in str(e):
+            return {"status": "ERROR 429", "summary": "OpenAI QUOTA LIMIT reached. Please switch to another models." , "sources": ["OPENAI"], "confidence": 100, "error_code": 429}
+        else: 
+            return {"status": "Needs Verification", "summary": str(e), "sources": [], "confidence": 50}
 
-        # Generic fallback
-        return {
-            "status": "Needs Verification",
-            "summary": err_text[:200],
-            "sources": [],
-            "confidence": 50,
-            "error_code": 500,
-        }
 
 def huggingface_agent(claim: str) -> Dict[str, Any]:
     """Call HuggingFace Inference API for fact-checking."""

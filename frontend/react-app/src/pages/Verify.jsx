@@ -4,7 +4,7 @@ import { API_BASE_URL } from "../utils/api";
 
 function Verify() {
   const [claim, setClaim] = useState("");
-  const [selectedAgent, setSelectedAgent] = useState("openai");
+  const [selectedAgent, setSelectedAgent] = useState("gemini");
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
 
