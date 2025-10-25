@@ -89,7 +89,8 @@ def init_db():
             category TEXT NOT NULL,
             source TEXT,
             summary TEXT,
-            region TEXT DEFAULT 'all'
+            region TEXT DEFAULT 'all',
+            url TEXT
         )
         """
     )
