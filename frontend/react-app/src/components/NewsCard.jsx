@@ -36,7 +36,7 @@ const NewsCard = ({ title, source, summary, category, url, expert, frameless = f
 
   const containerClass = frameless
     ? ""
-    : "border rounded-lg p-4 shadow hover:shadow-xl transition-all duration-300 ease-out transform bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100";
+    : "border rounded-lg p-4 shadow hover:shadow-xl transition-all duration-300 ease-out transform bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 h-full flex flex-col";
 
   return (
     <div className={`${containerClass} ${frameless ? "" : "hover:-translate-y-1"}`.trim()}>
@@ -51,14 +51,14 @@ const NewsCard = ({ title, source, summary, category, url, expert, frameless = f
       )}
 
       {url ? (
-        <a href={url} target="_blank" rel="noopener noreferrer" className="font-bold text-lg mb-2 hover:underline">
+        <a href={url} target="_blank" rel="noopener noreferrer" className="font-bold text-lg mb-2 hover:underline block">
           {title}
         </a>
       ) : (
         <h3 className="font-bold text-lg mb-2">{title}</h3>
       )}
       {source && <p className="text-sm text-gray-500 mb-2">Source: {source}</p>}
-  {summary && <p className="text-gray-700 dark:text-gray-300">{summary}</p>}
+      {summary && <p className="text-gray-700 dark:text-gray-300 flex-grow line-clamp-3">{summary}</p>}
 
       {/* Expert Verification Info */}
       {expert && expert.is_verified && (
