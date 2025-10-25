@@ -181,7 +181,7 @@ def openai_agent(claim: str) -> Dict[str, Any]:
         _logger.warning("OpenAI agent failed: %s", e)
 
         if "429" in str(e):
-            return {"status": "ERROR 429", "summary": "OpenAI QUOTA LIMIT reached. Please switch to another models." , "sources": ["OPENAI"], "confidence": 100, "error_code": 429}
+            return {"status": "ERROR 429", "summary": "OpenAI QUOTA LIMIT reached. Please switch to another model." , "sources": ["OPENAI"], "confidence": 100, "error_code": 429}
         else: 
             return {"status": "Needs Verification", "summary": str(e), "sources": [], "confidence": 50}
 
