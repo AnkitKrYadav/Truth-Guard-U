@@ -4,19 +4,14 @@ from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 import sqlite3
 import os
-from dotenv import load_dotenv, find_dotenv
 from datetime import datetime, timezone
-import os
 import time
 # Avoid printing secrets to logs
 # print("OPENAI KEY (Render):", os.getenv("OPENAI_API_KEY")[:15])
 
 # Load environment variables (try Backend/.env, then project root)
-if not load_dotenv():
-    # If not found in Backend, try project root
-    import pathlib
-    root_env = pathlib.Path(__file__).parent.parent / ".env"
-    load_dotenv(dotenv_path=root_env)
+from utils.env_loader import load_env
+load_env()
 
 # --------- Helper: Compute Confidence Score ---------
 def _compute_confidence(status: str, news_sources: list, fact_checks: list) -> int:
@@ -60,14 +55,6 @@ if allowed_origins_env:
             "methods": ["GET", "POST", "OPTIONS"],
         }}
     )
-else:
-    # Dev fallback: allow all origins and headers under /api/*
-    CORS(app, resources={r"/api/*": {"origins": "*", "allow_headers": ["*"], "methods": ["GET", "POST", "OPTIONS"]}})
-
-# Database path
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, "database", "news.db")
-
 # --------- Simple In-Memory TTL Cache (dev optimization) ---------
 # Caches select API responses briefly to collapse duplicate requests (e.g., React StrictMode)
 _response_cache = {
@@ -78,6 +65,10 @@ _response_cache = {
 # TTLs can be tuned via env vars
 TRENDING_TOP_TTL = int(os.getenv("TRENDING_TOP_TTL", "30"))  # seconds
 STATS_TTL = int(os.getenv("STATS_TTL", "15"))  # seconds
+
+# Database path
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, "database", "news.db")
 
 # --------- Database Helper ---------
 def get_db_connection():
@@ -98,7 +89,8 @@ def init_db():
             category TEXT NOT NULL,
             source TEXT,
             summary TEXT,
-            region TEXT DEFAULT 'all'
+            region TEXT DEFAULT 'all',
+            url TEXT
         )
         """
     )

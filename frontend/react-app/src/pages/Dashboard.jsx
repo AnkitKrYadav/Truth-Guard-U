@@ -65,7 +65,7 @@ const Dashboard = () => {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {trendingNews.map((news, idx) => (
-              <div key={idx} className="fade-in-up" style={{ animationDelay: `${idx * 80}ms` }}>
+              <div key={idx} className="fade-in-up h-full" style={{ animationDelay: `${idx * 80}ms` }}>
                 <NewsCard {...news} />
               </div>
             ))}

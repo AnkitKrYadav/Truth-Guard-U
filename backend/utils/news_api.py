@@ -5,6 +5,10 @@ from typing import List, Dict
 import sqlite3
 import praw
 
+from .env_loader import load_env
+
+load_env()
+
 logger = logging.getLogger("news_api")
 
 
@@ -81,7 +85,7 @@ def fetch_reddit_trending(subreddit: str = "news", limit: int = 10) -> List[Dict
     """Fetch trending posts from Reddit public JSON (no auth)."""
     url = f"https://www.reddit.com/r/{subreddit}/hot.json"
     params = {"limit": limit}
-    headers = {"User-Agent": "TruthGuardBot/1.0 (by u/yourbot)"}
+    headers = {"User-Agent": "TruthGuard/1.0"}
     try:
         resp = requests.get(url, params=params, headers=headers, timeout=10)
         if resp.status_code != 200:
@@ -185,13 +189,17 @@ def fetch_trending_mix(limit_per_source: int = 10, region: str = "in") -> List[D
     db_path = os.path.join(os.path.dirname(__file__), "..", "database", "news.db")
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
+    
+    # Ensure region_val is set before the loop
+    region_val = region or "all"
+    
     for it in items:
         title = (it.get("title") or "").strip()
         url = (it.get("url") or "").strip()
         category = it.get("category") or "General"
         source = it.get("source") or "Unknown"
         summary = it.get("summary") or ""
-        region_val = region or "all"
+        
         # Deduplicate by title+source
         if not title:
             continue
@@ -202,12 +210,19 @@ def fetch_trending_mix(limit_per_source: int = 10, region: str = "in") -> List[D
             )
         except Exception as e:
             logger.warning(f"DB insert failed for news: {title[:40]}... {e}")
+    
     conn.commit()
+    
     # Query back trending news from DB
-    rows = c.execute(
-        "SELECT title, category, source, summary, region, url FROM news WHERE region=? ORDER BY id DESC LIMIT ?",
-        (region_val, limit_per_source * 3)
-    ).fetchall()
+    try:
+        rows = c.execute(
+            "SELECT title, category, source, summary, region, url FROM news WHERE region=? ORDER BY id DESC LIMIT ?",
+            (region_val, limit_per_source * 3)
+        ).fetchall()
+    except Exception as e:
+        logger.exception(f"Failed to query trending news from DB: {e}")
+        rows = []
+    
     conn.close()
     unique = []
     seen = set()

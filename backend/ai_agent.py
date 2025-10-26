@@ -15,6 +15,8 @@ from typing import List, Dict, Any, Optional
 import requests
 import time
 
+from utils.env_loader import load_env
+
 # Optional imports
 try:
     import openai
@@ -39,6 +41,8 @@ except ImportError:
 # Logging setup
 logging.basicConfig(level=logging.INFO)
 _logger = logging.getLogger(__name__)
+
+load_env()
 
 # Environment variables
 NEWS_API_KEY = os.getenv("NEWS_API_KEY")
@@ -175,7 +179,11 @@ def openai_agent(claim: str) -> Dict[str, Any]:
         return data
     except Exception as e:
         _logger.warning("OpenAI agent failed: %s", e)
-        return {"status": "Needs Verification", "summary": str(e), "sources": [], "confidence": 50}
+
+        if "429" in str(e):
+            return {"status": "ERROR 429", "summary": "OpenAI QUOTA LIMIT reached. Please switch to another model." , "sources": ["OPENAI"], "confidence": 100, "error_code": 429}
+        else: 
+            return {"status": "Needs Verification", "summary": str(e), "sources": [], "confidence": 50}
 
 
 def huggingface_agent(claim: str) -> Dict[str, Any]:
