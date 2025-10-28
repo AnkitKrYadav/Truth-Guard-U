@@ -540,6 +540,144 @@ def trending_live():
     return jsonify(results)
 
 
+# --------- IoT-friendly Endpoints (Gemini-only, lean payload) ---------
+def _truncate(text: str, max_len: int = 180) -> str:
+    t = (text or "").strip()
+    if len(t) <= max_len:
+        return t
+    return t[: max_len - 1].rstrip() + "…"
+
+
+@app.route("/api/iot/trending", methods=["GET"]) 
+def iot_trending():
+    """Return Gemini-verified trending news with a lean payload for ESP32.
+    Query params: region (default 'in'), limit (default 8)
+    """
+    try:
+        limit = int(request.args.get("limit", 8))
+    except Exception:
+        limit = 8
+    region = request.args.get("region", "in")
+
+    # Fetch latest trending items (reuse existing fetcher)
+    if not fetch_trending_mix:
+        return jsonify({"error": "Trending fetcher not available"}), 500
+    raw_items = fetch_trending_mix(limit_per_source=max(1, limit // 2), region=region)
+
+    # De-duplicate by key and cap
+    def _make_key(it: dict) -> str:
+        return (it.get("url") or it.get("title") or "").strip()
+    seen = set()
+    items = []
+    for it in raw_items:
+        k = _make_key(it)
+        if not k or k in seen:
+            continue
+        seen.add(k)
+        items.append(it)
+        if len(items) >= limit:
+            break
+
+    # Verify each with Gemini and cache
+    results = []
+    for it in items:
+        title = it.get("title") or ""
+        url = it.get("url")
+        key = (url or title).strip()
+
+        cached = get_news_verification(key, "gemini") if key else None
+        ai: dict = {}
+        if cached and not is_verification_expired(cached.get("verified_at")):
+            ai = {"status": cached["status"], "confidence": cached["confidence"], "agent": "gemini", "cached": True}
+        elif verify_claim_with_ai and title:
+            try:
+                ai = verify_claim_with_ai(title, agent="gemini")
+                if key and ai.get("status") is not None:
+                    set_news_verification(key, "gemini", ai.get("status", "Needs Verification"), ai.get("summary", ""), ai.get("confidence", 50))
+                ai["cached"] = False
+            except Exception as e:
+                ai = {"status": "Needs Verification", "confidence": 50, "agent": "gemini", "cached": False, "error": str(e)}
+
+        results.append({
+            "title": title,
+            "source": it.get("source"),
+            "url": url,
+            "category": it.get("category", "General"),
+            "summary": _truncate(it.get("summary"), 160),
+            "status": ai.get("status", "Needs Verification"),
+            "confidence": ai.get("confidence", 50)
+        })
+
+    return jsonify(results)
+
+
+@app.route("/api/iot/search", methods=["GET"]) 
+def iot_search():
+    """Search recent news by title (DB-first) and return Gemini-verified results.
+    Query params: query (q), limit (default 6)
+    """
+    q = (request.args.get("query") or request.args.get("q") or "").strip()
+    if not q:
+        return jsonify({"error": "Missing query"}), 400
+    try:
+        limit = int(request.args.get("limit", 6))
+    except Exception:
+        limit = 6
+
+    # DB search first
+    conn = get_db_connection()
+    rows = conn.execute(
+        "SELECT title, source, summary, category, url FROM news WHERE title LIKE ? ORDER BY id DESC LIMIT ?",
+        (f"%{q}%", limit)
+    ).fetchall()
+    conn.close()
+    items = [
+        {
+            "title": r[0] if isinstance(r, tuple) else r["title"],
+            "source": r[1] if isinstance(r, tuple) else r["source"],
+            "summary": r[2] if isinstance(r, tuple) else r["summary"],
+            "category": r[3] if isinstance(r, tuple) else r["category"],
+            "url": r[4] if isinstance(r, tuple) else r["url"],
+        }
+        for r in rows
+    ]
+
+    # If no items found, return empty array (avoid external rate limits)
+    if not items:
+        return jsonify([])
+
+    # Verify with Gemini and cache
+    results = []
+    for it in items:
+        title = it.get("title") or ""
+        url = it.get("url")
+        key = (url or title).strip()
+        cached = get_news_verification(key, "gemini") if key else None
+        ai: dict = {}
+        if cached and not is_verification_expired(cached.get("verified_at")):
+            ai = {"status": cached["status"], "confidence": cached["confidence"], "agent": "gemini", "cached": True}
+        elif verify_claim_with_ai and title:
+            try:
+                ai = verify_claim_with_ai(title, agent="gemini")
+                if key and ai.get("status") is not None:
+                    set_news_verification(key, "gemini", ai.get("status", "Needs Verification"), ai.get("summary", ""), ai.get("confidence", 50))
+                ai["cached"] = False
+            except Exception as e:
+                ai = {"status": "Needs Verification", "confidence": 50, "agent": "gemini", "cached": False, "error": str(e)}
+
+        results.append({
+            "title": title,
+            "source": it.get("source"),
+            "url": url,
+            "category": it.get("category", "General"),
+            "summary": _truncate(it.get("summary"), 160),
+            "status": ai.get("status", "Needs Verification"),
+            "confidence": ai.get("confidence", 50)
+        })
+
+    return jsonify(results)
+
+
 @app.route("/api/expert-verifications", methods=["POST"])
 def save_expert_verification():
     # Optional admin key guard: if ADMIN_KEY is set, require matching header
