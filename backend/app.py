@@ -39,8 +39,13 @@ def _compute_confidence(status: str, news_sources: list, fact_checks: list) -> i
     return max(0, min(100, score))
 
 
+# Static folder for React frontend (optional - only if Frontend exists)
 static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Frontend", "react-app", "build")
-app = Flask(__name__, static_folder=os.path.abspath(static_dir))
+if os.path.exists(static_dir):
+    app = Flask(__name__, static_folder=os.path.abspath(static_dir))
+else:
+    # Backend-only mode (no frontend static files)
+    app = Flask(__name__)
 
 # Restrictive CORS in production, permissive in local dev
 # Supports comma-separated ALLOWED_ORIGINS, or single ALLOWED_ORIGIN for backward compatibility
