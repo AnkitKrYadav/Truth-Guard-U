@@ -176,6 +176,15 @@ def init_db():
         )
         """
     )
+    # Jobs table for lightweight scheduling (e.g., hourly refresh)
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS jobs (
+            name TEXT PRIMARY KEY,
+            last_run TEXT NOT NULL
+        )
+        """
+    )
     
     # Users table
     c.execute(
@@ -319,6 +328,143 @@ def get_news_actions_count(news_key):
         counts[row["action"]] = row["count"]
     return counts
 
+# --------- Fallback: Recent Verified News (DB) ---------
+def get_recent_verified(limit: int = 10, region: str = "all"):
+    """Return recently verified news items from DB, optionally filtered by region.
+    Uses news_verifications joined with news/news_history to enrich fields.
+    """
+    conn = get_db_connection()
+    c = conn.cursor()
+    try:
+        # Prefer exact URL match; fall back to title when URL missing
+        rows = c.execute(
+            """
+            SELECT 
+                COALESCE(nh.title, n.title, nv.news_key) AS title,
+                COALESCE(nh.source, n.source, 'Unknown') AS source,
+                COALESCE(nh.summary, n.summary, '') AS summary,
+                COALESCE(nh.category, n.category, 'General') AS category,
+                COALESCE(nh.url, n.url, nv.news_key) AS url,
+                nv.status AS status,
+                nv.confidence AS confidence,
+                nv.verified_at AS verified_at
+            FROM news_verifications nv
+            LEFT JOIN news n ON (n.url = nv.news_key OR n.title = nv.news_key)
+            LEFT JOIN news_history nh ON (nh.url = nv.news_key OR nh.title = nv.news_key)
+            WHERE nv.status IN ('True','False')
+              AND (
+                    ? = 'all' OR 
+                    EXISTS (
+                        SELECT 1 FROM news n2 
+                        WHERE (n2.url = nv.news_key OR n2.title = nv.news_key) 
+                          AND n2.region = ?
+                    )
+                )
+            ORDER BY datetime(nv.verified_at) DESC
+            LIMIT ?
+            """,
+            (region, region, limit)
+        ).fetchall()
+    except Exception:
+        rows = []
+    finally:
+        conn.close()
+
+    items = []
+    for r in rows:
+        # sqlite rows can be Row or tuple
+        title = r[0] if isinstance(r, tuple) else r["title"]
+        source = r[1] if isinstance(r, tuple) else r["source"]
+        summary = r[2] if isinstance(r, tuple) else r["summary"]
+        category = r[3] if isinstance(r, tuple) else r["category"]
+        url = r[4] if isinstance(r, tuple) else r["url"]
+        status = r[5] if isinstance(r, tuple) else r["status"]
+        confidence = r[6] if isinstance(r, tuple) else r["confidence"]
+        items.append({
+            "title": title,
+            "source": source,
+            "summary": summary,
+            "category": category,
+            "url": url,
+            "status": status,
+            "confidence": confidence,
+        })
+    return items
+
+# --------- Hourly Refresh (opportunistic, DB-guarded) ---------
+def _job_last_run(name: str) -> float:
+    conn = get_db_connection()
+    try:
+        row = conn.execute("SELECT last_run FROM jobs WHERE name=?", (name,)).fetchone()
+        if row:
+            ts = row[0] if isinstance(row, tuple) else row["last_run"]
+            try:
+                return datetime.fromisoformat(ts).timestamp()
+            except Exception:
+                return 0.0
+        return 0.0
+    finally:
+        conn.close()
+
+def _job_set_run(name: str):
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            """
+            INSERT INTO jobs (name, last_run) VALUES (?, ?)
+            ON CONFLICT(name) DO UPDATE SET last_run=excluded.last_run
+            """,
+            (name, datetime.now(timezone.utc).isoformat())
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+def ensure_hourly_refresh(region: str = "in", verify_limit: int = 10):
+    """Fetch and cache trending news and verifications roughly every hour.
+    This is triggered lazily by requests and guarded via the jobs table.
+    Safe to call frequently; it runs at most once per hour per service.
+    """
+    try:
+        last_ts = _job_last_run("hourly_refresh")
+        now_ts = time.time()
+        if now_ts - last_ts < 3600:
+            return  # fresh enough
+
+        # Mark run time early to avoid thundering herd; the work is idempotent
+        _job_set_run("hourly_refresh")
+
+        if not fetch_trending_mix:
+            return
+        # Fetch and persist news
+        fetched = fetch_trending_mix(limit_per_source=6, region=region) or []
+        # Verify a subset with Gemini and cache results
+        if verify_claim_with_ai:
+            seen = set()
+            count = 0
+            for it in fetched:
+                if count >= max(3, verify_limit):
+                    break
+                key = (it.get("url") or it.get("title") or "").strip()
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                try:
+                    ai = verify_claim_with_ai(it.get("title", ""), agent="gemini")
+                    if ai and ai.get("status"):
+                        set_news_verification(
+                            key,
+                            "gemini",
+                            ai.get("status", "Needs Verification"),
+                            ai.get("summary", ""),
+                            ai.get("confidence", 50),
+                        )
+                        count += 1
+                except Exception:
+                    continue
+    except Exception:
+        # Best-effort; never block requests
+        return
 # --------- Top Trending News Helpers ---------
 def update_top_trending():
     """Update top_trending_news table with top 5 news by like count and recency."""
@@ -444,7 +590,10 @@ def trending_live():
     if not fetch_trending_mix:
         return jsonify({"error": "Trending fetcher not available"}), 500
 
-    raw_items = fetch_trending_mix(limit_per_source=max(1, limit // 2), region=region)
+    # Opportunistic refresh before serving
+    ensure_hourly_refresh(region=region)
+
+    raw_items = fetch_trending_mix(limit_per_source=max(1, limit // 2), region=region) or []
     # De-duplicate by URL/title key and cap to limit
     def _make_key(it: dict) -> str:
         return (it.get("url") or it.get("title") or "").strip()
@@ -459,6 +608,29 @@ def trending_live():
         if len(deduped) >= limit:
             break
     raw_items = deduped
+
+    # Fallback to recent verified if no items from sources
+    if not raw_items:
+        fallback = get_recent_verified(limit=limit, region=region)
+        results = []
+        for it in fallback:
+            results.append({
+                "title": it.get("title"),
+                "source": it.get("source"),
+                "summary": it.get("summary"),
+                "url": it.get("url"),
+                "category": it.get("category", "General"),
+                "verification": {
+                    "status": it.get("status", "Needs Verification"),
+                    "summary": it.get("summary", ""),
+                    "confidence": it.get("confidence", 50),
+                    "cached": True,
+                    "agent": "gemini",
+                    "agent_used": "gemini"
+                },
+                "actions": {"like": 0, "dislike": 0, "bookmark": 0}
+            })
+        return jsonify(results)
 
     # Save all items as 'browsed' in history and add region
     for item in raw_items:
@@ -564,10 +736,13 @@ def iot_trending():
         limit = 8
     region = request.args.get("region", "in")
 
+    # Opportunistic refresh before serving
+    ensure_hourly_refresh(region=region)
+
     # Fetch latest trending items (reuse existing fetcher)
     if not fetch_trending_mix:
         return jsonify({"error": "Trending fetcher not available"}), 500
-    raw_items = fetch_trending_mix(limit_per_source=max(1, limit // 2), region=region)
+    raw_items = fetch_trending_mix(limit_per_source=max(1, limit // 2), region=region) or []
 
     # De-duplicate by key and cap
     def _make_key(it: dict) -> str:
@@ -612,6 +787,22 @@ def iot_trending():
             "status": ai.get("status", "Needs Verification"),
             "confidence": ai.get("confidence", 50)
         })
+
+    # If we couldn't gather anything (e.g., API limits), fallback to recent verified
+    if not results:
+        fallback = get_recent_verified(limit=limit, region=region)
+        out = []
+        for it in fallback:
+            out.append({
+                "title": it.get("title"),
+                "source": it.get("source"),
+                "url": it.get("url"),
+                "category": it.get("category", "General"),
+                "summary": _truncate(it.get("summary"), 160),
+                "status": it.get("status", "Needs Verification"),
+                "confidence": it.get("confidence", 50)
+            })
+        return jsonify(out)
 
     return jsonify(results)
 
