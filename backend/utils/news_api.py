@@ -201,7 +201,9 @@ def fetch_trending_mix(limit_per_source: int = 10, region: str = "in") -> List[D
 
     # Save all fetched news to DB (deduped by title/url)
     db_path = os.path.join(os.path.dirname(__file__), "..", "database", "news.db")
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=30.0)  # 30 second timeout for locks
+    conn.execute("PRAGMA journal_mode=WAL")  # Enable WAL mode for better concurrency
+    conn.execute("PRAGMA busy_timeout=30000")  # 30 second busy timeout
     c = conn.cursor()
     
     # Ensure region_val is set before the loop

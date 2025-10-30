@@ -82,8 +82,12 @@ DB_PATH = os.path.join(BASE_DIR, "database", "news.db")
 
 # --------- Database Helper ---------
 def get_db_connection():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)  # 30 second timeout for locks
     conn.row_factory = sqlite3.Row
+    # Enable WAL mode for better concurrency
+    conn.execute("PRAGMA journal_mode=WAL")
+    # Set busy timeout
+    conn.execute("PRAGMA busy_timeout=30000")
     return conn
 
 def init_db():
@@ -586,8 +590,30 @@ def update_top_trending():
             (news_key, news_key)
         ).fetchone()
         
+        # Check if item has title key (dict) or if we should use row index access
+        has_title = False
+        try:
+            has_title = 'title' in item.keys()
+        except (AttributeError, TypeError):
+            has_title = True  # Row objects from fallback query have title column
+        
         # Use data from item if it has the fields (fallback case), otherwise use history
-        if history or verification or 'title' in item.keys():
+        if history or verification or has_title:
+            # Handle both dict and sqlite3.Row objects
+            try:
+                title = item.get("title") if hasattr(item, 'get') else item["title"]
+                source = item.get("source") if hasattr(item, 'get') else item["source"]
+                summary = item.get("summary") if hasattr(item, 'get') else item["summary"]
+                url = item.get("url") if hasattr(item, 'get') else item["url"]
+                category = item.get("category") if hasattr(item, 'get') else item["category"]
+            except (KeyError, IndexError):
+                # Fallback to history or defaults
+                title = history["title"] if history else news_key[:100]
+                source = history["source"] if history else "Unknown"
+                summary = history["summary"] if history else (verification["summary"] if verification else "")
+                url = history["url"] if history else news_key
+                category = history["category"] if history else "General"
+            
             c.execute(
                 """
                 INSERT OR REPLACE INTO top_trending_news 
@@ -596,11 +622,11 @@ def update_top_trending():
                 """,
                 (
                     news_key,
-                    item.get("title") or (history["title"] if history else news_key[:100]),
-                    item.get("source") or (history["source"] if history else "Unknown"),
-                    item.get("summary") or (history["summary"] if history else (verification["summary"] if verification else "")),
-                    item.get("url") or (history["url"] if history else news_key),
-                    item.get("category") or (history["category"] if history else "General"),
+                    title or (history["title"] if history else news_key[:100]),
+                    source or (history["source"] if history else "Unknown"),
+                    summary or (history["summary"] if history else (verification["summary"] if verification else "")),
+                    url or (history["url"] if history else news_key),
+                    category or (history["category"] if history else "General"),
                     verification["status"] if verification else "Needs Verification",
                     verification["confidence"] if verification else 50,
                     like_count,
