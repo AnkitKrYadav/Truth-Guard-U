@@ -36,7 +36,7 @@ const NewsCard = ({ title, source, summary, category, url, expert, frameless = f
 
   const containerClass = frameless
     ? ""
-    : "border rounded-lg p-4 shadow hover:shadow-xl transition-all duration-300 ease-out transform bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 h-full flex flex-col";
+    : "border border-gray-200/60 dark:border-gray-700/60 rounded-2xl p-5 shadow-xl backdrop-blur-md bg-white/40 dark:bg-gray-800/30 hover:shadow-2xl hover:bg-white/50 dark:hover:bg-gray-800/40 transition-all duration-300 ease-out transform h-full flex flex-col";
 
   return (
     <div className={`${containerClass} ${frameless ? "" : "hover:-translate-y-1"}`.trim()}>

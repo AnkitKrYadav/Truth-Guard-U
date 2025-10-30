@@ -1,8 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
-import axios from "axios";
-import { API_BASE_URL } from "../utils/api";
+import { useAuth } from "../context/AuthContext";
 
 const ExpertSignup = ({ onSignup }) => {
   const [username, setUsername] = useState("");
@@ -14,24 +13,18 @@ const ExpertSignup = ({ onSignup }) => {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
+  const { login, setRole } = useAuth();
+
   const handleSignup = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError("");
-    try {
-      const res = await axios.post(`${API_BASE_URL}/api/auth/expert-signup`, {
-        username,
-        email,
-        password,
-        full_name: fullName,
-        organization,
-      });
-      if (onSignup) onSignup(res.data);
-    } catch (err) {
-      setError(err.response?.data?.error || "Signup failed");
-    } finally {
-      setLoading(false);
-    }
+    // Mock expert signup; mark role as expert
+    setTimeout(() => {
+      login({ username, email, role: "expert", full_name: fullName, organization });
+      setRole("expert");
+      navigate("/account");
+    }, 300);
   };
 
   return (

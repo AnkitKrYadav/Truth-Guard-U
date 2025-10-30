@@ -4,9 +4,7 @@ const StatsWidget = ({ title, value, icon, bgColor, darkBg, className = "", styl
   const displayIcon = icon || "📊"; // Fallback to bar chart emoji
   return (
     <div
-      className={`flex items-center p-4 rounded-lg shadow-md transition-transform duration-300 hover:-translate-y-1 hover:shadow-lg ${bgColor} ${
-        darkBg || "dark:bg-gray-800/40"
-      } ${className}`.trim()}
+      className={`flex items-center p-5 rounded-2xl shadow-xl backdrop-blur-md bg-white/50 dark:bg-gray-800/30 border border-gray-200/60 dark:border-gray-700/60 transition-all duration-300 hover:-translate-y-2 hover:shadow-2xl hover:bg-white/60 dark:hover:bg-gray-800/40 ${className}`.trim()}
       style={style}
     >
       <div className="text-3xl mr-4 text-gray-700 dark:text-gray-200" role="img" aria-label={`${title} icon`}>

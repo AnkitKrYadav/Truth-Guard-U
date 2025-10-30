@@ -1,8 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
-import axios from "axios";
-import { API_BASE_URL } from "../utils/api";
+import { useAuth } from "../context/AuthContext";
 
 const Login = ({ onLogin }) => {
   const [username, setUsername] = useState("");
@@ -11,21 +10,17 @@ const Login = ({ onLogin }) => {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
+  const { login } = useAuth();
+
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError("");
-    try {
-      const res = await axios.post(`${API_BASE_URL}/api/auth/login`, {
-        username,
-        password,
-      });
-      if (onLogin) onLogin(res.data);
-    } catch (err) {
-      setError(err.response?.data?.error || "Login failed");
-    } finally {
-      setLoading(false);
-    }
+    // Mock client-side login; integrate API later
+    setTimeout(() => {
+      login({ username, role: "user" });
+      navigate("/account");
+    }, 300);
   };
 
   return (

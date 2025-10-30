@@ -146,6 +146,15 @@ def init_db():
     )
 
     # News likes/dislikes/bookmarks table
+    # Check if index exists; if not, we may need to clean duplicates first
+    existing_index = c.execute(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_news_likes_unique'"
+    ).fetchone()
+    
+    if not existing_index:
+        # Drop and recreate table to ensure clean schema with unique constraint
+        c.execute("DROP TABLE IF EXISTS news_likes")
+    
     c.execute(
         """
         CREATE TABLE IF NOT EXISTS news_likes (
@@ -153,7 +162,8 @@ def init_db():
             news_key TEXT NOT NULL,
             user_id TEXT,
             action TEXT NOT NULL, -- 'like', 'dislike', 'bookmark'
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            UNIQUE(news_key, user_id, action)
         )
         """
     )
@@ -300,19 +310,62 @@ def is_verification_expired(verified_at_str, expiry_hours=1):
 
 # --------- News Likes/Dislikes/Bookmarks Helpers ---------
 def add_news_action(news_key, user_id, action):
-    """Add a like/dislike/bookmark action for a news item."""
+    """Apply a like/dislike/bookmark with per-user uniqueness and toggle behavior.
+    - like/dislike are mutually exclusive for a user on the same news_key
+    - repeating the same action toggles it off (removes the prior row)
+    - bookmark toggles on/off independently
+    """
     conn = get_db_connection()
     c = conn.cursor()
     created_at = datetime.now(timezone.utc).isoformat()
-    c.execute(
-        """
-        INSERT INTO news_likes (news_key, user_id, action, created_at)
-        VALUES (?, ?, ?, ?)
-        """,
-        (news_key, user_id, action, created_at)
-    )
-    conn.commit()
-    conn.close()
+
+    try:
+        if action == "bookmark":
+            exists = c.execute(
+                "SELECT 1 FROM news_likes WHERE news_key=? AND user_id=? AND action='bookmark'",
+                (news_key, user_id)
+            ).fetchone()
+            if exists:
+                c.execute(
+                    "DELETE FROM news_likes WHERE news_key=? AND user_id=? AND action='bookmark'",
+                    (news_key, user_id)
+                )
+            else:
+                c.execute(
+                    "INSERT OR IGNORE INTO news_likes (news_key, user_id, action, created_at) VALUES (?, ?, 'bookmark', ?)",
+                    (news_key, user_id, created_at)
+                )
+        elif action in ("like", "dislike"):
+            current = c.execute(
+                "SELECT action FROM news_likes WHERE news_key=? AND user_id=? AND action IN ('like','dislike')",
+                (news_key, user_id)
+            ).fetchone()
+            if current:
+                curr = current[0] if isinstance(current, tuple) else current["action"]
+                if curr == action:
+                    # toggle off
+                    c.execute(
+                        "DELETE FROM news_likes WHERE news_key=? AND user_id=? AND action IN ('like','dislike')",
+                        (news_key, user_id)
+                    )
+                else:
+                    # switch like<->dislike
+                    c.execute(
+                        "DELETE FROM news_likes WHERE news_key=? AND user_id=? AND action IN ('like','dislike')",
+                        (news_key, user_id)
+                    )
+                    c.execute(
+                        "INSERT OR IGNORE INTO news_likes (news_key, user_id, action, created_at) VALUES (?, ?, ?, ?)",
+                        (news_key, user_id, action, created_at)
+                    )
+            else:
+                c.execute(
+                    "INSERT OR IGNORE INTO news_likes (news_key, user_id, action, created_at) VALUES (?, ?, ?, ?)",
+                    (news_key, user_id, action, created_at)
+                )
+        conn.commit()
+    finally:
+        conn.close()
 
 def get_news_actions_count(news_key):
     """Get counts of likes/dislikes/bookmarks for a news item."""
@@ -1041,16 +1094,18 @@ def admin_badges():
 # --- News Actions API (Like/Dislike/Bookmark) ---
 @app.route("/api/news/action", methods=["POST"])
 def news_action():
-    """Add a like/dislike/bookmark action for a news item.
-    Request body: {news_key, user_id (optional), action}
+    """Add or toggle a like/dislike/bookmark for a news item (per-user unique).
+    Request body: {news_key, user_id (required), action}
     """
     data = request.json or {}
     news_key = (data.get("news_key") or "").strip()
-    user_id = data.get("user_id") or "anonymous"
+    user_id = (data.get("user_id") or "").strip()
     action = (data.get("action") or "").strip().lower()
     
     if not news_key or action not in ("like", "dislike", "bookmark"):
         return jsonify({"error": "Invalid news_key or action"}), 400
+    if not user_id:
+        return jsonify({"error": "user_id required"}), 401
     
     add_news_action(news_key, user_id, action)
     counts = get_news_actions_count(news_key)

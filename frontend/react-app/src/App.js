@@ -17,6 +17,8 @@ import Account from "./pages/Account";
 
 import { ThemeProvider } from "./context/ThemeContext";
 import { UserPrefsProvider } from "./context/UserPrefsContext";
+import { AuthProvider } from "./context/AuthContext";
+import { ToastProvider } from "./context/ToastContext";
 import "./index.css";
 
 function App() {
@@ -24,9 +26,14 @@ function App() {
   const toggleSidebar = () => setSidebarCollapsed((s) => !s);
   return (
     <ThemeProvider>
+      <AuthProvider>
       <UserPrefsProvider>
+      <ToastProvider>
         <Router>
           <div className="p-6 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 min-h-screen flex h-screen">
+            <div className="tg-bg"></div>
+            <div className="tg-grid"></div>
+            <div className="tg-glow"></div>
             <Sidebar collapsed={sidebarCollapsed} />
             <div className="flex flex-col flex-grow">
               <Navbar onToggleSidebar={toggleSidebar} />
@@ -48,7 +55,9 @@ function App() {
             </div>
           </div>
         </Router>
+      </ToastProvider>
       </UserPrefsProvider>
+      </AuthProvider>
     </ThemeProvider>
   );
 }

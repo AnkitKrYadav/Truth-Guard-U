@@ -1,8 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
-import axios from "axios";
-import { API_BASE_URL } from "../utils/api";
+import { useAuth } from "../context/AuthContext";
 
 const Signup = ({ onSignup }) => {
   const [username, setUsername] = useState("");
@@ -12,22 +11,17 @@ const Signup = ({ onSignup }) => {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
+  const { login } = useAuth();
+
   const handleSignup = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError("");
-    try {
-      const res = await axios.post(`${API_BASE_URL}/api/auth/signup`, {
-        username,
-        email,
-        password,
-      });
-      if (onSignup) onSignup(res.data);
-    } catch (err) {
-      setError(err.response?.data?.error || "Signup failed");
-    } finally {
-      setLoading(false);
-    }
+    // Mock client-side signup; integrate API later
+    setTimeout(() => {
+      login({ username, email, role: "user" });
+      navigate("/account");
+    }, 300);
   };
 
   return (

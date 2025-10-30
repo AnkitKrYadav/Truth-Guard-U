@@ -1,16 +1,21 @@
 import React, { useState } from "react";
 import axios from "axios";
 import { API_BASE_URL } from "../utils/api";
+import { useToast } from "../context/ToastContext";
 
 function Verify() {
   const [claim, setClaim] = useState("");
   const [selectedAgent, setSelectedAgent] = useState("gemini");
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
+  const { toast } = useToast();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!claim.trim()) return;
+    if (!claim.trim()) {
+      toast({ message: "Please enter a claim", type: "warning" });
+      return;
+    }
 
     setLoading(true);
     setResult(null);
@@ -25,13 +30,16 @@ function Verify() {
       );
 
       setResult(res.data);
+      toast({ message: "Verification complete", type: "success", timeout: 1500 });
     } catch (err) {
       console.error(err);
       // Check if it's a rate limit error (429)
       if (err.response && err.response.status === 429) {
         setResult({ error: "Please use another model." });
+        toast({ title: "Rate limited", message: "Try another model", type: "warning" });
       } else {
         setResult({ error: "Error verifying claim." });
+        toast({ title: "Verification failed", message: err.message || "Unknown error", type: "error" });
       }
     } finally {
       setLoading(false);
@@ -59,28 +67,33 @@ function Verify() {
   };
 
   return (
-    <div className="p-6 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 min-h-screen">
-      <h2 className="text-3xl font-bold mb-6 text-gray-800 dark:text-gray-100">
-        Verify News
-      </h2>
+    <div className="p-8 bg-transparent text-gray-900 dark:text-gray-100 min-h-screen space-y-6">
+      <header className="text-center space-y-2 mb-6">
+        <h2 className="text-4xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-blue-400">
+          Verify News
+        </h2>
+        <p className="text-md text-gray-600 dark:text-gray-300 max-w-lg mx-auto">
+          Enter a claim and select an AI model to fact-check instantly.
+        </p>
+      </header>
 
       {/* Input Section */}
       <form
         onSubmit={handleSubmit}
-        className="flex flex-col sm:flex-row gap-3 mb-6 items-center"
+        className="flex flex-col sm:flex-row gap-3 mb-6 items-center max-w-3xl mx-auto"
       >
         <input
           type="text"
           value={claim}
           onChange={(e) => setClaim(e.target.value)}
           placeholder="Enter news or claim to verify..."
-          className="flex-grow p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600"
+          className="flex-grow p-3 border border-gray-300/60 dark:border-gray-700/60 rounded-xl bg-white/60 dark:bg-gray-800/40 backdrop-blur-md shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
         />
 
         <select
           value={selectedAgent}
           onChange={(e) => setSelectedAgent(e.target.value)}
-          className="p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600"
+          className="p-3 border border-gray-300/60 dark:border-gray-700/60 rounded-xl bg-white/60 dark:bg-gray-800/40 backdrop-blur-md shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
         >
           <option value="openai">TruthGPT (OpenAI)</option>
           <option value="hf">DeepFact (HuggingFace)</option>
@@ -90,7 +103,7 @@ function Verify() {
         <button
           type="submit"
           disabled={loading}
-          className="px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition"
+          className="px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-500 text-white font-semibold rounded-xl hover:brightness-110 shadow-lg hover:shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {loading ? "Verifying..." : "Verify"}
         </button>
@@ -98,18 +111,18 @@ function Verify() {
 
       {/* Result Card */}
       {result && (
-        <div className="p-5 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 max-w-2xl">
+        <div className="p-6 border border-gray-200/60 dark:border-gray-700/60 rounded-2xl shadow-xl backdrop-blur-md bg-white/50 dark:bg-gray-800/30 text-gray-900 dark:text-gray-100 max-w-3xl mx-auto">
           {result.error ? (
             <p className="text-red-500">{result.error}</p>
           ) : (
             <>
-              <div className="flex items-center gap-3 mb-2">
+              <div className="flex items-center gap-3 mb-3 flex-wrap">
                 <p className="font-medium text-lg">
                   Claim: <span className="font-semibold">{claim}</span>
                 </p>
                 {result.agent && (
                   <span
-                    className={`px-2 py-1 text-xs font-semibold rounded-full ${getAgentColor(
+                    className={`px-3 py-1 text-xs font-semibold rounded-full ${getAgentColor(
                       result.agent
                     )}`}
                   >
@@ -137,7 +150,7 @@ function Verify() {
                     Confidence Score:{" "}
                     <span className="font-semibold">{result.confidence}%</span>
                   </p>
-                  <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3">
+                  <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3 overflow-hidden">
                     <div
                       className={`h-3 rounded-full transition-all duration-500 ${getConfidenceColor(
                         result.confidence

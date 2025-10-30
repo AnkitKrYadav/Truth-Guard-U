@@ -2,7 +2,9 @@ import React, { useEffect, useState } from "react";
 import StatsWidget from "../components/StatsWidget";
 import NewsCard from "../components/NewsCard";
 import axios from "axios";
-import { API_BASE_URL, postExpertVerification } from "../utils/api";
+import { API_BASE_URL, postExpertVerification, fetchTrendingLiveSWR } from "../utils/api";
+import { useAuth } from "../context/AuthContext";
+import { useToast } from "../context/ToastContext";
 
 const Trending = () => {
   const [trendingNews, setTrendingNews] = useState([]);
@@ -13,24 +15,15 @@ const Trending = () => {
   const [agent, setAgent] = useState("auto");
   const [region, setRegion] = useState("in");
   const [submitting, setSubmitting] = useState(null);
+  const { isLoggedIn, isExpert, user } = useAuth();
+  const { toast } = useToast();
 
   const fetchTrending = async () => {
     setLoading(true);
     try {
-      let usedAgent = agent;
-      let newsRes;
-      try {
-        newsRes = await axios.get(`${API_BASE_URL}/api/trending/live?agent=${agent}&limit=12&region=${region}`);
-      } catch (err) {
-        // If selected agent is rate-limited and it's OpenAI, fallback to HuggingFace
-        if (agent === "openai" && err.response && err.response.status === 429) {
-          usedAgent = "hf";
-          newsRes = await axios.get(`${API_BASE_URL}/api/trending/live?agent=hf&limit=12&region=${region}`);
-        } else {
-          throw err;
-        }
-      }
-      const items = (newsRes.data || []).map((n) => ({
+      // 1) Show cached immediately if any
+      const { cached, fresh } = await fetchTrendingLiveSWR({ agent, region, limit: 12, cacheMs: 2 * 60 * 1000 });
+      const toItems = (arr) => (arr || []).map((n) => ({
         id: n.id || n.url || n.title,
         title: n.title,
         source: n.source,
@@ -40,19 +33,26 @@ const Trending = () => {
         verification: n.verification,
         actions: n.actions || { like: 0, dislike: 0, bookmark: 0 },
       }));
-      setTrendingNews(items);
-      // Only show categories that have news
-      const categoryCounts = items.reduce((acc, item) => {
-        acc[item.category] = (acc[item.category] || 0) + 1;
-        return acc;
-      }, {});
-      const derivedCats = ["All", ...Object.keys(categoryCounts)];
-      setCategories(derivedCats);
-      if (agent === "openai" && usedAgent === "hf") {
-        window.alert("OpenAI rate limit reached. Showing HuggingFace results instead.");
+
+      if (cached && cached.length > 0) {
+        setTrendingNews(toItems(cached));
+        setLoading(false); // perceived instant load
+      }
+
+      // 2) Apply fresh when it arrives (if not already applied by cache)
+      if (fresh && Array.isArray(fresh)) {
+        const items = toItems(fresh);
+        setTrendingNews(items);
+        const categoryCounts = items.reduce((acc, item) => {
+          acc[item.category] = (acc[item.category] || 0) + 1;
+          return acc;
+        }, {});
+        const derivedCats = ["All", ...Object.keys(categoryCounts)];
+        setCategories(derivedCats);
       }
     } catch (err) {
       console.error("Error fetching data:", err);
+      toast({ title: "Failed to load trending", message: "Showing cached or fallback if available.", type: "warning" });
     } finally {
       setLoading(false);
     }
@@ -151,9 +151,9 @@ const Trending = () => {
 
 
   return (
-    <div className="p-6 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 min-h-screen space-y-6">
+    <div className="p-8 bg-transparent text-gray-900 dark:text-gray-100 min-h-screen space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Trending Topics</h1>
+        <h1 className="text-4xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-blue-400">Trending Topics</h1>
         <button
           onClick={fetchTrending}
           className="ml-4 inline-flex items-center justify-center h-10 w-10 rounded-full border border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100 hover:border-blue-300 transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
@@ -269,8 +269,18 @@ const Trending = () => {
       </div>
 
       {/* News Cards */}
-      {loading ? (
-        <p>Loading trending news...</p>
+      {loading && trendingNews.length === 0 ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="border border-gray-200 dark:border-gray-700 rounded-xl p-4 bg-white dark:bg-gray-900 shadow-sm animate-pulse">
+              <div className="h-4 w-24 rounded bg-gray-200 dark:bg-gray-700 mb-3" />
+              <div className="h-5 w-3/4 rounded bg-gray-200 dark:bg-gray-700 mb-2" />
+              <div className="h-4 w-1/2 rounded bg-gray-200 dark:bg-gray-700 mb-4" />
+              <div className="h-3 w-full rounded bg-gray-200 dark:bg-gray-700 mb-2" />
+              <div className="h-3 w-5/6 rounded bg-gray-200 dark:bg-gray-700" />
+            </div>
+          ))}
+        </div>
       ) : filteredNews.length === 0 ? (
         <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-lg p-6 text-center">
           <svg className="w-16 h-16 mx-auto mb-4 text-yellow-600 dark:text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -297,15 +307,22 @@ const Trending = () => {
             const actions = news.actions || { like: 0, dislike: 0, bookmark: 0 };
             
             const handleAction = async (action) => {
+              if (!isLoggedIn) {
+                toast({ title: "Sign in required", message: "Login or signup to like, dislike, or bookmark.", type: "warning" });
+                return;
+              }
               try {
                 await axios.post(`${API_BASE_URL}/api/news/action`, {
                   news_key: key,
                   action: action,
+                  user_id: user?.username || "user",
                 });
                 // Refresh to update counts
                 await fetchTrending();
+                toast({ message: `${action} recorded`, type: "success", timeout: 1500 });
               } catch (err) {
                 console.error("Error performing action:", err);
+                toast({ message: "Action failed", type: "error" });
               }
             };
 
@@ -319,8 +336,10 @@ const Trending = () => {
                 });
                 // Refresh to show updated verification
                 await fetchTrending();
+                toast({ message: "Verification requested", type: "success", timeout: 1500 });
               } catch (err) {
                 console.error("Error verifying news:", err);
+                toast({ message: "Verification failed", type: "error" });
               } finally {
                 setSubmitting(null);
               }
@@ -409,6 +428,7 @@ const Trending = () => {
                 </div>
                 
                 {/* Expert Verification Controls - Keep for admin/expert use */}
+                {isExpert && (
                 <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
                   <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Expert Override:</p>
                   <div className="flex items-center gap-2">
@@ -459,6 +479,7 @@ const Trending = () => {
                     </button>
                   </div>
                 </div>
+                )}
               </div>
             );
           })}
