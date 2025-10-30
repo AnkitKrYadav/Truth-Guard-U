@@ -1,7 +1,28 @@
 import axios from "axios";
 
 // Single source of truth for API base URL
-export const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || "";
+// In production: Use the same origin (backend serves frontend)
+// In development: Use proxy or explicit backend URL
+// Environment variable can override for custom deployments
+const getApiBaseUrl = () => {
+  // Priority 1: Environment variable (for custom deployments)
+  if (process.env.REACT_APP_API_BASE_URL) {
+    return process.env.REACT_APP_API_BASE_URL;
+  }
+  
+  // Priority 2: Check if in production build served by backend
+  // If the page is served from the same origin as the API, use relative URLs
+  if (process.env.NODE_ENV === 'production') {
+    return window.location.origin; // Use same origin in production
+  }
+  
+  // Priority 3: Development mode - use empty string (relies on proxy in package.json)
+  return "";
+};
+
+export const API_BASE_URL = getApiBaseUrl();
+
+console.log('API Base URL:', API_BASE_URL); // Debug log
 
 export const postVerify = (claim, agent = "openai") => {
   return axios.post(`${API_BASE_URL}/api/verify`, { claim, agent });

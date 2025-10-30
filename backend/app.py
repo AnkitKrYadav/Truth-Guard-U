@@ -545,6 +545,26 @@ def update_top_trending():
         """
     ).fetchall()
     
+    # Fallback: If no likes yet, get recent news from news table
+    if not top_news or len(top_news) == 0:
+        logger.info("No liked news found, using recent news from database")
+        top_news = c.execute(
+            """
+            SELECT 
+                COALESCE(url, title) as news_key,
+                0 as like_count,
+                datetime('now') as latest_action,
+                title,
+                source,
+                summary,
+                category,
+                url
+            FROM news
+            ORDER BY id DESC
+            LIMIT 5
+            """
+        ).fetchall()
+    
     # Clear existing top trending
     c.execute("DELETE FROM top_trending_news")
     
@@ -560,13 +580,14 @@ def update_top_trending():
             (news_key,)
         ).fetchone()
         
-        # Try to get news details from history
+        # Try to get news details from history or use data from news table (fallback case)
         history = c.execute(
             "SELECT title, source, summary, category, url FROM news_history WHERE url=? OR title=? LIMIT 1",
             (news_key, news_key)
         ).fetchone()
         
-        if history or verification:
+        # Use data from item if it has the fields (fallback case), otherwise use history
+        if history or verification or 'title' in item.keys():
             c.execute(
                 """
                 INSERT OR REPLACE INTO top_trending_news 
@@ -575,11 +596,11 @@ def update_top_trending():
                 """,
                 (
                     news_key,
-                    history["title"] if history else news_key[:100],
-                    history["source"] if history else "Unknown",
-                    history["summary"] if history else (verification["summary"] if verification else ""),
-                    history["url"] if history else news_key,
-                    history["category"] if history else "General",
+                    item.get("title") or (history["title"] if history else news_key[:100]),
+                    item.get("source") or (history["source"] if history else "Unknown"),
+                    item.get("summary") or (history["summary"] if history else (verification["summary"] if verification else "")),
+                    item.get("url") or (history["url"] if history else news_key),
+                    item.get("category") or (history["category"] if history else "General"),
                     verification["status"] if verification else "Needs Verification",
                     verification["confidence"] if verification else 50,
                     like_count,
