@@ -4,6 +4,7 @@ from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 import sqlite3
 import os
+import logging
 from datetime import datetime, timezone
 import time
 # Avoid printing secrets to logs
@@ -12,6 +13,10 @@ import time
 # Load environment variables (try Backend/.env, then project root)
 from utils.env_loader import load_env
 load_env()
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # --------- Helper: Compute Confidence Score ---------
 def _compute_confidence(status: str, news_sources: list, fact_checks: list) -> int:
@@ -613,6 +618,18 @@ def trending():
         news = conn.execute("SELECT * FROM news").fetchall()
     else:
         news = conn.execute("SELECT * FROM news WHERE region=?", (region,)).fetchall()
+    
+    # If database is empty, trigger a fetch
+    if not news and fetch_trending_mix:
+        conn.close()
+        logger.info("Database empty, triggering news fetch")
+        ensure_hourly_refresh(region=region if region != "all" else "in")
+        conn = get_db_connection()
+        if region == "all":
+            news = conn.execute("SELECT * FROM news").fetchall()
+        else:
+            news = conn.execute("SELECT * FROM news WHERE region=?", (region,)).fetchall()
+    
     conn.close()
     return jsonify([dict(n) for n in news])
 

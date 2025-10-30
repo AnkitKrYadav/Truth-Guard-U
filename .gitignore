@@ -1,5 +1,7 @@
 # Environment variables
 .env 
+.env.local
+.env.production
 
 # Python
 __pycache__/
@@ -11,6 +13,22 @@ venv/
 
 # Node / React
 node_modules/
+
+# Security & Sensitive Data
+*.db
+*.sqlite
+*.sqlite3
+.db_key
+Backend/.db_key
+Backend/logs/
+Backend/database/backups/
+*.key
+*.pem
+*.crt
+
+# IDE
+.vscode/
+.idea/
 
 # Other
 .DS_Store

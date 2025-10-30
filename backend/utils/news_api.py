@@ -180,8 +180,22 @@ def fetch_instagram_trending(region: str = "in", limit: int = 10) -> List[Dict]:
 def fetch_trending_mix(limit_per_source: int = 10, region: str = "in") -> List[Dict]:
     """Fetch trending news from APIs, save to DB, and return deduped list."""
     items = []
-    items += fetch_newsapi_top_headlines(country=region, page_size=limit_per_source)
-    items += fetch_reddit_trending_oauth(subreddit="news", limit=limit_per_source)
+    
+    # Try NewsAPI first
+    news_items = fetch_newsapi_top_headlines(country=region, page_size=limit_per_source)
+    items += news_items
+    
+    # Always fetch Reddit as fallback/additional source (no auth needed)
+    reddit_items = fetch_reddit_trending(subreddit="news", limit=limit_per_source)
+    items += reddit_items
+    
+    # If we have Reddit OAuth credentials, also try that for more sources
+    if os.getenv("REDDIT_CLIENT_ID") and os.getenv("REDDIT_CLIENT_SECRET"):
+        reddit_oauth_items = fetch_reddit_trending_oauth(subreddit="worldnews", limit=limit_per_source)
+        items += reddit_oauth_items
+    
+    logger.info(f"Fetched {len(news_items)} from NewsAPI, {len(reddit_items)} from Reddit public")
+    
     # TODO: Add Twitter fetcher here if keys are set
     # items += fetch_twitter_trending_oauth(region=region, limit=limit_per_source)
 
@@ -238,9 +252,25 @@ def fetch_trending_mix(limit_per_source: int = 10, region: str = "in") -> List[D
                 "region": r[4] if isinstance(r, tuple) else r["region"],
                 "url": r[5] if isinstance(r, tuple) else r["url"]
             })
-    # Fallback: if DB is empty, provide sample trending items
+    
+    # Fallback 1: If DB is empty but we fetched items, return those directly
+    if not unique and items:
+        logger.info("DB query returned empty, returning fetched items directly")
+        unique = items[:limit_per_source * 2]
+    
+    # Fallback 2: If both DB and fetch are empty, try multiple Reddit sources
     if not unique:
-        logger.warning("fetch_trending_mix returned 0 items from DB; using fallback")
+        logger.warning("No items from API or DB; trying additional Reddit sources")
+        for subreddit in ["news", "worldnews", "technology", "science"]:
+            fallback_reddit = fetch_reddit_trending(subreddit=subreddit, limit=5)
+            unique.extend(fallback_reddit)
+            if len(unique) >= limit_per_source:
+                unique = unique[:limit_per_source * 2]
+                break
+    
+    # Fallback 3: Absolute last resort - sample trending items
+    if not unique:
+        logger.warning("All sources failed; using sample trending items")
         unique = [
             {
                 "title": "Breaking: Global climate summit reaches historic agreement",
@@ -278,4 +308,6 @@ def fetch_trending_mix(limit_per_source: int = 10, region: str = "in") -> List[D
                 "category": "Sports"
             },
         ]
+    
+    logger.info(f"Returning {len(unique)} unique items from fetch_trending_mix")
     return unique

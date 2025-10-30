@@ -23,9 +23,13 @@ try:
 except ImportError:
     openai = None
 
+# Make transformers import truly optional and lazy
+pipeline = None
 try:
     from transformers import pipeline
-except ImportError:
+except (ImportError, Exception) as e:
+    # Transformers can be slow to import or fail due to dependencies
+    logging.warning(f"Transformers import skipped: {e}")
     pipeline = None
 
 try:
