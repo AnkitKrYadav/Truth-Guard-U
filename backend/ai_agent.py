@@ -23,14 +23,9 @@ try:
 except ImportError:
     openai = None
 
-# Make transformers import truly optional and lazy
+# Make transformers truly optional - don't import at module level
+# Import will happen inside huggingface_agent() function if needed
 pipeline = None
-try:
-    from transformers import pipeline
-except (ImportError, Exception) as e:
-    # Transformers can be slow to import or fail due to dependencies
-    logging.warning(f"Transformers import skipped: {e}")
-    pipeline = None
 
 try:
     from huggingface_hub import login as hf_login
